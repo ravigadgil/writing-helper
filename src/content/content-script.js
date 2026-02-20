@@ -193,22 +193,21 @@ document.addEventListener('keydown', (e) => {
   applyFixAll();
 }, true);
 
-// ── "Improve with AI" floating button on text selection ───────────────────
+// ── AI toolbar on text selection (Improve + Rephrase tones) ──────────────
 
-let aiBtn = null;
+let aiToolbar = null;
 
-function createAIBtn() {
-  if (aiBtn) return aiBtn;
-  aiBtn = document.createElement('button');
-  aiBtn.className = 'spelling-tab-ai-btn';
-  aiBtn.textContent = 'Improve with AI';
-  aiBtn.style.setProperty('display', 'none', 'important');
-  document.body.appendChild(aiBtn);
-  return aiBtn;
+function createAIToolbar() {
+  if (aiToolbar) return aiToolbar;
+  aiToolbar = document.createElement('div');
+  aiToolbar.className = 'spelling-tab-ai-toolbar';
+  aiToolbar.style.setProperty('display', 'none', 'important');
+  document.body.appendChild(aiToolbar);
+  return aiToolbar;
 }
 
-function hideAIBtn() {
-  if (aiBtn) aiBtn.style.setProperty('display', 'none', 'important');
+function hideAIToolbar() {
+  if (aiToolbar) aiToolbar.style.setProperty('display', 'none', 'important');
 }
 
 function findTrackedElementFromNode(node) {
@@ -227,92 +226,124 @@ function findTrackedElementFromNode(node) {
   return null;
 }
 
+function findSpanInField(tracked, selectedText) {
+  let spanStart = 0;
+  let spanEnd = selectedText.length;
+
+  if (tracked.type === 'overlay') {
+    const fullText = tracked.element.value || '';
+    const idx = fullText.indexOf(selectedText);
+    if (idx !== -1) { spanStart = idx; spanEnd = idx + selectedText.length; }
+  } else {
+    const state = ceHandler.tracked.get(tracked.element);
+    if (state) {
+      const fullText = state.text || '';
+      const idx = fullText.indexOf(selectedText);
+      if (idx !== -1) { spanStart = idx; spanEnd = idx + selectedText.length; }
+    }
+  }
+
+  return { spanStart, spanEnd };
+}
+
+async function handleAIAction(actionType, tone, selectedText, tracked, anchorEl) {
+  try {
+    let result;
+    let label;
+    let resultText;
+
+    if (actionType === 'improve') {
+      result = await chrome.runtime.sendMessage({ type: 'ai-improve', text: selectedText });
+      resultText = result?.improved;
+      label = 'AI-improved version';
+    } else {
+      result = await chrome.runtime.sendMessage({ type: 'ai-rephrase', text: selectedText, tone });
+      resultText = result?.rephrased;
+      const toneLabels = { friendly: 'Friendly', professional: 'Professional', casual: 'Casual' };
+      label = `${toneLabels[tone] || 'AI'} rephrase`;
+    }
+
+    if (result?.available && resultText && resultText !== selectedText) {
+      const { spanStart, spanEnd } = findSpanInField(tracked, selectedText);
+      suggestionPopup.show({
+        span: { start: spanStart, end: spanEnd },
+        message: label,
+        lintKind: 'Enhancement',
+        lintKindPretty: 'AI Improvement',
+        category: 'style',
+        problemText: selectedText,
+        suggestions: [{ text: resultText, kind: 'ReplaceWith' }],
+      }, tracked.element, anchorEl);
+      hideAIToolbar();
+      return true;
+    }
+  } catch (err) {
+    // fall through
+  }
+  return false;
+}
+
 document.addEventListener('mouseup', (e) => {
-  if (e.target === aiBtn) return;
+  if (aiToolbar && aiToolbar.contains(e.target)) return;
 
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) {
-    hideAIBtn();
+    hideAIToolbar();
     return;
   }
 
   const anchor = sel.anchorNode;
   const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
-  if (!el) { hideAIBtn(); return; }
+  if (!el) { hideAIToolbar(); return; }
 
   const tracked = findTrackedElementFromNode(el);
-  if (!tracked) { hideAIBtn(); return; }
+  if (!tracked) { hideAIToolbar(); return; }
 
   const selectedText = sel.toString().trim();
   const range = sel.getRangeAt(0);
   const rect = range.getBoundingClientRect();
 
-  const btn = createAIBtn();
-  btn.style.setProperty('left', rect.left + 'px', 'important');
-  btn.style.setProperty('top', (rect.top - 34 + window.scrollY) + 'px', 'important');
-  btn.style.setProperty('display', 'block', 'important');
-  btn.disabled = false;
-  btn.textContent = 'Improve with AI';
+  const toolbar = createAIToolbar();
+  toolbar.innerHTML = '';
 
-  btn.onclick = async () => {
-    btn.textContent = 'Improving...';
-    btn.disabled = true;
+  const buttons = [
+    { label: '✨ Improve', action: 'improve', tone: null },
+    { label: '😊 Friendly', action: 'rephrase', tone: 'friendly' },
+    { label: '💼 Professional', action: 'rephrase', tone: 'professional' },
+    { label: '💬 Casual', action: 'rephrase', tone: 'casual' },
+  ];
 
-    // Find the actual position of the selected text within the full field text
-    let spanStart = 0;
-    let spanEnd = selectedText.length;
+  buttons.forEach(({ label, action, tone }) => {
+    const btn = document.createElement('button');
+    btn.className = 'spelling-tab-ai-btn';
+    btn.textContent = label;
 
-    if (tracked.type === 'overlay') {
-      // textarea / input — use .value
-      const fullText = tracked.element.value || '';
-      const idx = fullText.indexOf(selectedText);
-      if (idx !== -1) {
-        spanStart = idx;
-        spanEnd = idx + selectedText.length;
-      }
-    } else {
-      // contenteditable — build text map to find offset
-      const state = ceHandler.tracked.get(tracked.element);
-      if (state) {
-        const fullText = state.text || '';
-        const idx = fullText.indexOf(selectedText);
-        if (idx !== -1) {
-          spanStart = idx;
-          spanEnd = idx + selectedText.length;
-        }
-      }
-    }
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    try {
-      const result = await chrome.runtime.sendMessage({
-        type: 'ai-improve',
-        text: selectedText,
-      });
+      // Disable all buttons and show loading on clicked one
+      const allBtns = toolbar.querySelectorAll('.spelling-tab-ai-btn');
+      allBtns.forEach(b => { b.disabled = true; });
+      btn.textContent = 'Working...';
 
-      if (result?.available && result.improved && result.improved !== selectedText) {
-        suggestionPopup.show({
-          span: { start: spanStart, end: spanEnd },
-          message: 'AI-improved version',
-          lintKind: 'Enhancement',
-          lintKindPretty: 'AI Improvement',
-          category: 'style',
-          problemText: selectedText,
-          suggestions: [{ text: result.improved, kind: 'ReplaceWith' }],
-        }, tracked.element, btn);
-        hideAIBtn();
-      } else {
+      const success = await handleAIAction(action, tone, selectedText, tracked, toolbar);
+      if (!success) {
         btn.textContent = 'AI not available';
-        setTimeout(hideAIBtn, 1500);
+        setTimeout(hideAIToolbar, 1500);
       }
-    } catch (err) {
-      btn.textContent = 'AI not available';
-      setTimeout(hideAIBtn, 1500);
-    }
-  };
+    });
+
+    toolbar.appendChild(btn);
+  });
+
+  toolbar.style.setProperty('left', rect.left + 'px', 'important');
+  toolbar.style.setProperty('top', (rect.top - 38 + window.scrollY) + 'px', 'important');
+  toolbar.style.setProperty('display', 'flex', 'important');
 });
 
 document.addEventListener('mousedown', (e) => {
-  if (e.target !== aiBtn) hideAIBtn();
+  if (aiToolbar && !aiToolbar.contains(e.target)) hideAIToolbar();
 });
 
 detector.start();

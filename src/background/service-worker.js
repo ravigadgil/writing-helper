@@ -227,6 +227,8 @@ async function handleMessage(message, sender) {
     }
     case 'ai-improve':
       return sendToOffscreen({ type: 'ai-improve', text: message.text });
+    case 'ai-rephrase':
+      return sendToOffscreen({ type: 'ai-rephrase', text: message.text, tone: message.tone });
 
     case 'get-enabled':
       return { enabled: isEnabled };
