@@ -104,40 +104,124 @@ export class OverlayManager {
     if (this.onLintsChanged) this.onLintsChanged(element, lints);
   }
 
+  /**
+   * Extract sentence boundaries from text.
+   * Returns array of { start, end, text } for sentences with 5+ words.
+   */
+  extractSentences(text) {
+    const sentences = [];
+    // Split on sentence-ending punctuation followed by space or end-of-string
+    const re = /[^.!?\n]+[.!?]*/g;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      const s = match[0].trim();
+      const wordCount = s.split(/\s+/).length;
+      if (wordCount >= 5) {
+        const start = match.index;
+        const end = match.index + match[0].length;
+        sentences.push({ start, end, text: s });
+      }
+    }
+    return sentences;
+  }
+
   renderOverlay(element, text, lints) {
     const state = this.overlays.get(element);
     if (!state) return;
     const overlay = state.overlay;
     overlay.innerHTML = '';
 
-    if (lints.length === 0) return;
+    // Find all sentences (5+ words) — shown even if they contain errors
+    const sentences = this.extractSentences(text);
+    state.sentences = sentences; // store for later use
 
+    // Build sorted lint marks
     const sorted = [...lints].sort((a, b) => a.span.start - b.span.start);
 
-    let lastIndex = 0;
+    // Build a coverage map: ranges covered by sentence hints (excluding lint spans)
+    // For each sentence, split it around lint spans to produce non-overlapping hint fragments
+    const sentenceFragments = [];
+    sentences.forEach((sentence, i) => {
+      // Find lints that overlap this sentence
+      const overlapping = sorted.filter(l =>
+        l.span.start < sentence.end && l.span.end > sentence.start
+      );
+
+      if (overlapping.length === 0) {
+        // No lints overlap — whole sentence is a hint
+        sentenceFragments.push({ start: sentence.start, end: sentence.end, sentence, index: i });
+      } else {
+        // Split sentence around lint spans
+        let cursor = sentence.start;
+        for (const lint of overlapping) {
+          const lintStart = Math.max(lint.span.start, sentence.start);
+          const lintEnd = Math.min(lint.span.end, sentence.end);
+          if (cursor < lintStart) {
+            sentenceFragments.push({ start: cursor, end: lintStart, sentence, index: i });
+          }
+          cursor = Math.max(cursor, lintEnd);
+        }
+        if (cursor < sentence.end) {
+          sentenceFragments.push({ start: cursor, end: sentence.end, sentence, index: i });
+        }
+      }
+    });
+
+    // Merge lint marks and sentence fragment marks into one sorted list
+    const marks = [];
     sorted.forEach((lint, i) => {
-      if (lint.span.start > lastIndex) {
+      marks.push({ type: 'lint', start: lint.span.start, end: lint.span.end, lint, index: i });
+    });
+    sentenceFragments.forEach((frag) => {
+      marks.push({ type: 'sentence', start: frag.start, end: frag.end, sentence: frag.sentence, index: frag.index });
+    });
+
+    marks.sort((a, b) => a.start - b.start || (a.type === 'lint' ? -1 : 1));
+
+    if (marks.length === 0) return;
+
+    let lastIndex = 0;
+    marks.forEach((mark) => {
+      // Skip if this mark starts before our cursor (overlap case)
+      if (mark.start < lastIndex) return;
+
+      if (mark.start > lastIndex) {
         overlay.appendChild(
-          document.createTextNode(text.substring(lastIndex, lint.span.start))
+          document.createTextNode(text.substring(lastIndex, mark.start))
         );
       }
 
-      const mark = document.createElement('mark');
-      const cat = lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar');
-      mark.className = 'spelling-tab-error-' + cat;
-      mark.textContent = text.substring(lint.span.start, lint.span.end);
-      mark.style.pointerEvents = 'auto';
-      mark.style.cursor = 'pointer';
-      mark.dataset.lintIndex = String(i);
+      const el = document.createElement('mark');
 
-      mark.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.suggestionPopup.show(lint, element, mark);
-      });
+      if (mark.type === 'lint') {
+        const cat = mark.lint.category || (mark.lint.lintKind === 'Spelling' ? 'spelling' : 'grammar');
+        el.className = 'spelling-tab-error-' + cat;
+        el.textContent = text.substring(mark.start, mark.end);
+        el.style.pointerEvents = 'auto';
+        el.style.cursor = 'pointer';
+        el.dataset.lintIndex = String(mark.index);
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.suggestionPopup.show(mark.lint, element, el);
+        });
+      } else {
+        // Sentence hint — subtle purple highlight (fragment of a sentence)
+        el.className = 'spelling-tab-sentence-hint';
+        el.textContent = text.substring(mark.start, mark.end);
+        el.dataset.sentenceIndex = String(mark.index);
+        // Click dispatches custom event that content-script listens to
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          document.dispatchEvent(new CustomEvent('spelling-tab-sentence-click', {
+            detail: { sentence: mark.sentence, anchorEl: el, element },
+          }));
+        });
+      }
 
-      overlay.appendChild(mark);
-      lastIndex = lint.span.end;
+      overlay.appendChild(el);
+      lastIndex = mark.end;
     });
 
     if (lastIndex < text.length) {

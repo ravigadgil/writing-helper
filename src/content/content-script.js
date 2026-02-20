@@ -193,6 +193,48 @@ document.addEventListener('keydown', (e) => {
   applyFixAll();
 }, true);
 
+// ── Sentence-level AI suggestion (Grammarly-style) ───────────────────────
+
+// Listen for sentence clicks from overlay-manager
+document.addEventListener('spelling-tab-sentence-click', async (e) => {
+  const { sentence, anchorEl, element } = e.detail;
+  if (!sentence || !anchorEl || !element) return;
+
+  const tracked = findTrackedElementFromNode(element);
+  if (!tracked) return;
+
+  // Show loading state on the sentence mark
+  anchorEl.style.setProperty('background', 'rgba(139, 92, 246, 0.2)', 'important');
+  anchorEl.style.setProperty('cursor', 'wait', 'important');
+
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: 'ai-improve',
+      text: sentence.text,
+    });
+
+    if (result?.available && result.improved && result.improved !== sentence.text) {
+      const { spanStart, spanEnd } = findSpanInField(tracked, sentence.text);
+      suggestionPopup.show({
+        span: { start: spanStart, end: spanEnd },
+        message: 'Writing suggestion',
+        lintKind: 'Enhancement',
+        lintKindPretty: 'AI Improvement',
+        category: 'style',
+        problemText: sentence.text,
+        suggestions: [{ text: result.improved, kind: 'ReplaceWith' }],
+        _aiDiff: true, // triggers diff rendering in popup
+      }, tracked.element, anchorEl);
+    }
+  } catch (err) {
+    // silently fail
+  }
+
+  // Reset sentence mark style
+  anchorEl.style.removeProperty('background');
+  anchorEl.style.removeProperty('cursor');
+});
+
 // ── AI toolbar on text selection (Improve + Rephrase tones) ──────────────
 
 let aiToolbar = null;
