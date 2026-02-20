@@ -1,0 +1,19 @@
+{
+  "name": "spelling-tab",
+  "version": "1.0.0",
+  "description": "Offline grammar and spell checker Chrome extension powered by Harper.js",
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "harper.js": "^1.7.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3"
+  }
+}

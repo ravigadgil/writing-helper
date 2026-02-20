@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="header">
+      <h1>Spelling Tab</h1>
+      <label class="toggle-switch">
+        <input type="checkbox" id="toggle" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div id="issues-section">
+      <div id="loading" class="status-msg">Checking...</div>
+      <div id="no-issues" class="status-msg" style="display:none">No issues found</div>
+      <div id="issues-list"></div>
+    </div>
+
+    <button id="fix-all-btn" class="fix-all-btn" style="display:none">Fix All</button>
+
+    <div class="hint">
+      Press Tab to fix all, or click underlines to fix one
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

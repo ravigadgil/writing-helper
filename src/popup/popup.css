@@ -1,0 +1,208 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  max-height: 500px;
+  overflow-y: auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #333;
+  background: #fff;
+}
+
+.popup-container {
+  padding: 14px;
+}
+
+/* Header with title and toggle */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.header h1 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  border-radius: 20px;
+  transition: 0.2s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+input:checked + .toggle-slider {
+  background-color: #2563eb;
+}
+
+input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+
+/* Status messages */
+.status-msg {
+  text-align: center;
+  padding: 20px 0;
+  color: #888;
+  font-size: 13px;
+}
+
+/* Issue list */
+.issue-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.issue-item:last-child {
+  border-bottom: none;
+}
+
+.issue-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-bottom: 4px;
+}
+
+.badge-spelling {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.badge-grammar {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.badge-style {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.issue-info {
+  min-width: 0;
+}
+
+.issue-problem {
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.issue-error-text {
+  color: #dc2626;
+  text-decoration: line-through;
+  font-weight: 500;
+}
+
+.issue-message {
+  font-size: 11px;
+  color: #888;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+/* Suggestions row — all fix options as chips */
+.issue-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.issue-fix-btn {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.issue-fix-btn:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+/* Fix All button */
+.fix-all-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: #2563eb;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+
+.fix-all-btn:hover {
+  background: #1d4ed8;
+}
+
+/* Hint */
+.hint {
+  font-size: 10px;
+  color: #aaa;
+  text-align: center;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-family: inherit;
+  color: #555;
+  background: #f0f0f0;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+}
