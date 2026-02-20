@@ -196,6 +196,12 @@ document.addEventListener('keydown', (e) => {
 // ── AI toolbar on text selection (Improve + Rephrase tones) ──────────────
 
 let aiToolbar = null;
+let lastUsedTone = null;
+
+// Load last used tone from storage
+chrome.storage.local.get('lastAITone', (result) => {
+  if (result.lastAITone) lastUsedTone = result.lastAITone;
+});
 
 function createAIToolbar() {
   if (aiToolbar) return aiToolbar;
@@ -306,11 +312,24 @@ document.addEventListener('mouseup', (e) => {
   const toolbar = createAIToolbar();
   toolbar.innerHTML = '';
 
-  const buttons = [
-    { label: '✨ Improve', action: 'improve', tone: null },
+  const toneOptions = [
     { label: '😊 Friendly', action: 'rephrase', tone: 'friendly' },
     { label: '💼 Professional', action: 'rephrase', tone: 'professional' },
     { label: '💬 Casual', action: 'rephrase', tone: 'casual' },
+  ];
+
+  // Reorder: put last-used tone first among the tone options
+  if (lastUsedTone) {
+    const idx = toneOptions.findIndex(t => t.tone === lastUsedTone);
+    if (idx > 0) {
+      const [fav] = toneOptions.splice(idx, 1);
+      toneOptions.unshift(fav);
+    }
+  }
+
+  const buttons = [
+    { label: '✨ Improve', action: 'improve', tone: null },
+    ...toneOptions,
   ];
 
   buttons.forEach(({ label, action, tone }) => {
@@ -322,9 +341,16 @@ document.addEventListener('mouseup', (e) => {
       e.preventDefault();
       e.stopPropagation();
 
-      // Disable all buttons and show loading on clicked one
+      // Save last used tone
+      if (tone) {
+        lastUsedTone = tone;
+        chrome.storage.local.set({ lastAITone: tone });
+      }
+
+      // Disable all buttons and show spinner on clicked one
       const allBtns = toolbar.querySelectorAll('.spelling-tab-ai-btn');
       allBtns.forEach(b => { b.disabled = true; });
+      btn.classList.add('spelling-tab-ai-loading');
       btn.textContent = 'Working...';
 
       const success = await handleAIAction(action, tone, selectedText, tracked, toolbar);
@@ -337,13 +363,69 @@ document.addEventListener('mouseup', (e) => {
     toolbar.appendChild(btn);
   });
 
+  toolbar.style.setProperty('display', 'flex', 'important');
   toolbar.style.setProperty('left', rect.left + 'px', 'important');
   toolbar.style.setProperty('top', (rect.top - 38 + window.scrollY) + 'px', 'important');
-  toolbar.style.setProperty('display', 'flex', 'important');
+
+  // Clamp toolbar within viewport
+  requestAnimationFrame(() => {
+    const tbRect = toolbar.getBoundingClientRect();
+    if (tbRect.right > window.innerWidth) {
+      toolbar.style.setProperty('left', Math.max(4, window.innerWidth - tbRect.width - 8) + 'px', 'important');
+    }
+    if (tbRect.top < 0) {
+      toolbar.style.setProperty('top', (rect.bottom + 4 + window.scrollY) + 'px', 'important');
+    }
+  });
 });
 
 document.addEventListener('mousedown', (e) => {
   if (aiToolbar && !aiToolbar.contains(e.target)) hideAIToolbar();
+});
+
+// ── Keyboard shortcut: Ctrl+Shift+I to improve selected text with AI ─────
+
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey && e.shiftKey && e.key === 'I')) return;
+
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) return;
+
+  const anchor = sel.anchorNode;
+  const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+  if (!el) return;
+
+  const tracked = findTrackedElementFromNode(el);
+  if (!tracked) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const selectedText = sel.toString().trim();
+
+  // Show toolbar in "loading improve" state
+  const range = sel.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+  const toolbar = createAIToolbar();
+  toolbar.innerHTML = '';
+
+  const loadingBtn = document.createElement('button');
+  loadingBtn.className = 'spelling-tab-ai-btn spelling-tab-ai-loading';
+  loadingBtn.textContent = 'Improving...';
+  loadingBtn.disabled = true;
+  toolbar.appendChild(loadingBtn);
+
+  toolbar.style.setProperty('display', 'flex', 'important');
+  toolbar.style.setProperty('left', rect.left + 'px', 'important');
+  toolbar.style.setProperty('top', (rect.top - 38 + window.scrollY) + 'px', 'important');
+
+  handleAIAction('improve', null, selectedText, tracked, toolbar).then(success => {
+    if (!success) {
+      loadingBtn.classList.remove('spelling-tab-ai-loading');
+      loadingBtn.textContent = 'AI not available';
+      setTimeout(hideAIToolbar, 1500);
+    }
+  });
 });
 
 detector.start();

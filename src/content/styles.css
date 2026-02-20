@@ -107,7 +107,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12) !important;
   padding: 0 !important;
   min-width: 200px !important;
-  max-width: 340px !important;
+  max-width: 420px !important;
   z-index: 100001 !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
   font-size: 13px !important;
@@ -162,6 +162,8 @@
   font-weight: 500 !important;
   font-family: inherit !important;
   line-height: 1.4 !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
 }
 
 .spelling-tab-popup-suggestion:hover {
@@ -259,4 +261,21 @@
   opacity: 0.6 !important;
   cursor: wait !important;
   color: #888 !important;
+}
+
+.spelling-tab-ai-btn.spelling-tab-ai-loading::before {
+  content: '' !important;
+  display: inline-block !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid #c4b5fd !important;
+  border-top-color: #6d28d9 !important;
+  border-radius: 50% !important;
+  margin-right: 5px !important;
+  vertical-align: middle !important;
+  animation: spelling-tab-spin 0.6s linear infinite !important;
+}
+
+@keyframes spelling-tab-spin {
+  to { transform: rotate(360deg); }
 }
