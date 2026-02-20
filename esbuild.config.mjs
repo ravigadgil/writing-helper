@@ -9,6 +9,7 @@ mkdirSync('dist/content', { recursive: true });
 mkdirSync('dist/popup', { recursive: true });
 mkdirSync('dist/icons', { recursive: true });
 mkdirSync('dist/wasm', { recursive: true });
+mkdirSync('dist/offscreen', { recursive: true });
 
 // Common build options
 const commonOptions = {
@@ -45,13 +46,23 @@ const popupBuild = esbuild.build({
   format: 'iife',
 });
 
-await Promise.all([bgBuild, contentBuild, popupBuild]);
+// Build offscreen AI hub (ESM - extension page context)
+const offscreenBuild = esbuild.build({
+  ...commonOptions,
+  entryPoints: ['src/offscreen/offscreen.js'],
+  outfile: 'dist/offscreen/offscreen.js',
+  format: 'esm',
+  external: [], // no externals needed for offscreen
+});
+
+await Promise.all([bgBuild, contentBuild, popupBuild, offscreenBuild]);
 
 // Copy static assets
 cpSync('src/manifest.json', 'dist/manifest.json');
 cpSync('src/content/styles.css', 'dist/content/styles.css');
 cpSync('src/popup/popup.html', 'dist/popup/popup.html');
 cpSync('src/popup/popup.css', 'dist/popup/popup.css');
+cpSync('src/offscreen/offscreen.html', 'dist/offscreen/offscreen.html');
 
 if (existsSync('src/icons')) {
   cpSync('src/icons', 'dist/icons', { recursive: true });

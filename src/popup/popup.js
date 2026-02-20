@@ -3,10 +3,18 @@ const loading = document.getElementById('loading');
 const noIssues = document.getElementById('no-issues');
 const issuesList = document.getElementById('issues-list');
 const fixAllBtn = document.getElementById('fix-all-btn');
+const aiStatus = document.getElementById('ai-status');
+const aiStatusText = document.getElementById('ai-status-text');
 
 function getBadgeInfo(lint) {
   const cat = lint.category || 'grammar';
   const pretty = lint.lintKindPretty || lint.lintKind || 'Issue';
+
+  // AI-sourced lints get a special badge
+  if (lint.isAI) {
+    return { cls: 'badge-ai', label: pretty };
+  }
+
   switch (cat) {
     case 'spelling':
       return { cls: 'badge-spelling', label: pretty };
@@ -20,6 +28,21 @@ function getBadgeInfo(lint) {
 // Load enabled state
 chrome.runtime.sendMessage({ type: 'get-enabled' }, (response) => {
   if (response) toggle.checked = response.enabled;
+});
+
+// Check AI capabilities status
+chrome.runtime.sendMessage({ type: 'get-ai-status' }, (response) => {
+  if (response?.anyAIAvailable) {
+    aiStatus.style.display = 'flex';
+    const caps = response.capabilities;
+    if (caps.proofreader) {
+      aiStatusText.textContent = 'AI Proofreading Active';
+    } else if (caps.rewriter) {
+      aiStatusText.textContent = 'AI Rewrite Available';
+    } else if (caps.promptApi) {
+      aiStatusText.textContent = 'AI Available';
+    }
+  }
 });
 
 toggle.addEventListener('change', () => {

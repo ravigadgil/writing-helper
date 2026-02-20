@@ -123,7 +123,7 @@ export class OverlayManager {
       }
 
       const mark = document.createElement('mark');
-      const cat = lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar');
+      const cat = lint.isAI ? 'ai' : (lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar'));
       mark.className = 'spelling-tab-error-' + cat;
       mark.textContent = text.substring(lint.span.start, lint.span.end);
       mark.style.pointerEvents = 'auto';

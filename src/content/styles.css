@@ -217,3 +217,141 @@
   font-weight: 400 !important;
   opacity: 0.9 !important;
 }
+
+/* ── AI-specific styles ─────────────────────────────────────────────────── */
+
+/* AI-sourced underline — purple wavy (for textarea overlay marks) */
+.spelling-tab-error-ai {
+  background: transparent !important;
+  color: transparent !important;
+  text-decoration: underline wavy #8b5cf6 !important;
+  text-decoration-skip-ink: none !important;
+  text-underline-offset: 2px !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  border-radius: 0 !important;
+}
+
+/* AI-sourced underline for contenteditable (positioned div) */
+.spelling-tab-underline-ai {
+  position: absolute !important;
+  height: 2px !important;
+  background: linear-gradient(45deg, transparent 25%, #8b5cf6 25%, #8b5cf6 50%, transparent 50%, transparent 75%, #8b5cf6 75%) !important;
+  background-size: 4px 2px !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+}
+
+/* Divider between regular suggestions and AI section */
+.spelling-tab-popup-ai-divider {
+  height: 1px !important;
+  background: #e5e7eb !important;
+  margin: 4px 0 !important;
+}
+
+/* AI section container in suggestion popup */
+.spelling-tab-popup-ai-section {
+  padding: 6px 14px 8px !important;
+}
+
+/* "AI Rewrite" label */
+.spelling-tab-popup-ai-label {
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: #8b5cf6 !important;
+  margin-bottom: 4px !important;
+}
+
+/* "Rephrase this sentence" button */
+.spelling-tab-popup-ai-btn {
+  display: block !important;
+  width: 100% !important;
+  padding: 6px 10px !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 6px !important;
+  background: #faf5ff !important;
+  color: #6d28d9 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  text-align: left !important;
+  font-family: inherit !important;
+  transition: background 0.15s !important;
+}
+
+.spelling-tab-popup-ai-btn:hover {
+  background: #ede9fe !important;
+  border-color: #c4b5fd !important;
+}
+
+.spelling-tab-popup-ai-btn:disabled {
+  opacity: 0.6 !important;
+  cursor: wait !important;
+}
+
+/* AI suggestion result in popup */
+.spelling-tab-popup-ai-suggestion {
+  color: #6d28d9 !important;
+  background: #faf5ff !important;
+}
+
+.spelling-tab-popup-ai-suggestion:hover {
+  background-color: #ede9fe !important;
+}
+
+/* Tone variant buttons row */
+.spelling-tab-popup-ai-tones {
+  display: flex !important;
+  gap: 4px !important;
+  margin-top: 6px !important;
+}
+
+.spelling-tab-popup-ai-tone-btn {
+  padding: 3px 8px !important;
+  font-size: 10px !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  color: #6b7280 !important;
+  cursor: pointer !important;
+  font-family: inherit !important;
+  transition: background 0.15s !important;
+}
+
+.spelling-tab-popup-ai-tone-btn:hover {
+  background: #f3f4f6 !important;
+  border-color: #c4b5fd !important;
+}
+
+.spelling-tab-popup-ai-tone-btn:disabled {
+  opacity: 0.6 !important;
+  cursor: wait !important;
+}
+
+/* Floating "Improve with AI" button for text selection */
+.spelling-tab-ai-improve-btn {
+  position: absolute !important;
+  z-index: 100003 !important;
+  padding: 4px 10px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #6d28d9 !important;
+  background: #fff !important;
+  border: 1px solid #c4b5fd !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  cursor: pointer !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  transition: background 0.15s !important;
+  white-space: nowrap !important;
+}
+
+.spelling-tab-ai-improve-btn:hover {
+  background: #faf5ff !important;
+}
+
+.spelling-tab-ai-improve-btn:disabled {
+  opacity: 0.7 !important;
+  cursor: wait !important;
+}

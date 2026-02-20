@@ -5,6 +5,84 @@ let linter = null;
 let isEnabled = true;
 const tabLints = new Map(); // tabId -> lints array
 
+// ── Offscreen Document Lifecycle ─────────────────────────────────────────
+
+let offscreenCreating = null;
+
+async function ensureOffscreen() {
+  const existing = await chrome.offscreen.hasDocument();
+  if (existing) return;
+
+  if (offscreenCreating) {
+    await offscreenCreating;
+    return;
+  }
+
+  offscreenCreating = chrome.offscreen.createDocument({
+    url: 'offscreen/offscreen.html',
+    reasons: ['DOM_PARSER'],
+    justification: 'AI-powered grammar checking using Chrome Built-in AI APIs',
+  });
+
+  await offscreenCreating;
+  offscreenCreating = null;
+}
+
+/**
+ * Send a message to the offscreen document.
+ * Returns the response, or { available: false } on failure.
+ */
+async function sendToOffscreen(message) {
+  try {
+    await ensureOffscreen();
+    return await chrome.runtime.sendMessage({ ...message, target: 'offscreen' });
+  } catch (err) {
+    console.warn('Spelling Tab: offscreen message failed', err);
+    return { available: false };
+  }
+}
+
+// ── AI Proofreading (Phase 2 — async) ────────────────────────────────────
+
+async function requestAIProofread(text, tabId, existingLints) {
+  try {
+    const result = await sendToOffscreen({ type: 'ai-proofread', text });
+    if (!result || !result.available || !result.corrections || result.corrections.length === 0) return;
+
+    // Deduplicate: remove AI lints that overlap with existing Harper/custom lints
+    const occupied = existingLints.map(l => [l.span.start, l.span.end]);
+    const newAILints = result.corrections.filter(aiLint => {
+      return !occupied.some(([s, e]) =>
+        aiLint.span.start < e && aiLint.span.end > s
+      );
+    });
+
+    if (newAILints.length === 0) return;
+
+    // Merge and sort
+    const merged = [...existingLints, ...newAILints];
+    merged.sort((a, b) => a.span.start - b.span.start);
+
+    // Update stored lints
+    if (tabId) {
+      tabLints.set(tabId, merged);
+      chrome.action.setBadgeText({ text: String(merged.length), tabId });
+    }
+
+    // Notify content script to update underlines
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        type: 'ai-lints-update',
+        lints: merged,
+        text: text,
+      }).catch(() => {}); // tab may have navigated away
+    }
+  } catch (err) {
+    // AI is additive — silently fail
+    console.warn('Spelling Tab: AI proofread failed', err);
+  }
+}
+
 async function initLinter() {
   if (linter) return linter;
   const wasmUrl = chrome.runtime.getURL('wasm/harper_wasm_bg.wasm');
@@ -186,12 +264,47 @@ async function handleMessage(message, sender) {
           chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
         }
 
+        // PHASE 2: Fire-and-forget AI proofreading (async, non-blocking)
+        // Results will arrive via 'ai-lints-update' message to content script
+        if (message.text.length >= 10 && tabId) {
+          requestAIProofread(message.text, tabId, allLints);
+        }
+
         return { lints: allLints };
       } catch (err) {
         console.error('Spelling Tab lint error:', err);
         return { lints: [] };
       }
     }
+
+    // ── AI message relay to offscreen document ─────────────────────────
+    case 'ai-rewrite': {
+      return sendToOffscreen({
+        type: 'ai-rewrite',
+        text: message.text,
+        context: message.context || '',
+        tone: message.tone || 'as-is',
+        length: message.length || 'as-is',
+      });
+    }
+    case 'ai-improve': {
+      return sendToOffscreen({
+        type: 'ai-improve',
+        text: message.text,
+      });
+    }
+    case 'get-ai-status': {
+      try {
+        const caps = await sendToOffscreen({ type: 'get-ai-capabilities' });
+        return {
+          anyAIAvailable: !!(caps.proofreader || caps.rewriter || caps.promptApi),
+          capabilities: caps,
+        };
+      } catch (e) {
+        return { anyAIAvailable: false, capabilities: {} };
+      }
+    }
+
     case 'get-lints': {
       // Popup requests current lints for a tab
       const lints = tabLints.get(message.tabId) || [];

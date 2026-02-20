@@ -1,8 +1,8 @@
 # Writing Helper (Spelling Tab)
 
-A privacy-first, offline grammar and spell checker Chrome extension. Works like Grammarly but runs **entirely locally** on your machine using WebAssembly. No data ever leaves your browser.
+A privacy-first, offline grammar and spell checker Chrome extension. Works like Grammarly but runs **entirely locally** on your machine using WebAssembly and Chrome's built-in AI. No data ever leaves your browser.
 
-Powered by [Harper.js](https://github.com/automattic/harper) (Rust grammar engine compiled to WASM) and a custom 50+ rule pattern engine for comprehensive coverage.
+Powered by [Harper.js](https://github.com/automattic/harper) (Rust grammar engine compiled to WASM), a custom 50+ rule pattern engine, and **Chrome's built-in Gemini Nano AI** for intelligent proofreading, rewrites, and style improvements.
 
 ---
 
@@ -19,6 +19,11 @@ Powered by [Harper.js](https://github.com/automattic/harper) (Rust grammar engin
   - Press **Tab** to auto-fix all issues at once
   - Use the **extension popup** to review and fix issues one by one
 - **Non-destructive** -- Never auto-corrects. All fixes are user-initiated.
+- **AI-Powered (Optional)** -- On Chrome 138+, uses Chrome's built-in Gemini Nano for:
+  - **AI Proofreading** -- Additional grammar/spelling detection with explanations (purple underlines)
+  - **AI Rewrite** -- "Rephrase this sentence" with tone variants (Formal, Casual, Shorter)
+  - **AI Improve** -- Select text and click "Improve with AI" for intelligent rewrites
+  - Gracefully degrades -- all AI features are optional and additive
 
 ---
 
@@ -35,21 +40,24 @@ Powered by [Harper.js](https://github.com/automattic/harper) (Rust grammar engin
 ```
 src/
 ├── background/                  # Service Worker (runs Harper WASM)
-│   ├── service-worker.js        # WASM init, linting pipeline, suggestion post-processing
+│   ├── service-worker.js        # WASM init, linting pipeline, suggestion post-processing, AI relay
 │   └── custom-rules.js          # 50+ regex pattern rules + 250 misspelling corrections
+├── offscreen/                   # Offscreen Document (AI Hub — Gemini Nano)
+│   ├── offscreen.html           # Minimal page for AI API access
+│   └── offscreen.js             # Proofreader, Rewriter, Prompt API handlers
 ├── content/                     # Content Scripts (injected into web pages)
-│   ├── content-script.js        # Main orchestrator, Tab key handler, message routing
+│   ├── content-script.js        # Main orchestrator, Tab key, AI lint updates, improve button
 │   ├── linter-client.js         # Sends text to service worker, caches results
 │   ├── element-detector.js      # Detects textarea/input/contenteditable on focus
 │   ├── overlay-manager.js       # Mirror-div overlay for textarea/input underlines
 │   ├── contenteditable-handler.js # Range API underlines for contenteditable elements
-│   ├── suggestion-popup.js      # Click-on-underline popup with fix buttons
+│   ├── suggestion-popup.js      # Click-on-underline popup with fix buttons + AI rewrite
 │   ├── fix-pill.js              # "Tab to fix" hint that follows the cursor
-│   └── styles.css               # All extension styles (underlines, popups, hints)
+│   └── styles.css               # All extension styles (underlines, popups, hints, AI)
 ├── popup/                       # Extension Popup UI
-│   ├── popup.html               # Popup markup
-│   ├── popup.js                 # Loads issues for current tab, fix buttons
-│   └── popup.css                # Popup styling
+│   ├── popup.html               # Popup markup with AI status
+│   ├── popup.js                 # Loads issues for current tab, fix buttons, AI status
+│   └── popup.css                # Popup styling + AI badges
 ├── icons/                       # Extension icons (16, 48, 128px)
 └── manifest.json                # Chrome Extension Manifest V3
 ```
@@ -82,7 +90,37 @@ Combined & sorted lints sent back to content script
        │
        ▼
 Colored wavy underlines rendered on the page
+       │
+       ▼ (async, non-blocking — Phase 2)
+AI Proofreader runs via Offscreen Document (Gemini Nano)
+       │
+       ▼
+New AI lints merge in via 'ai-lints-update' message
+       │
+       ▼
+Purple AI underlines added alongside existing ones
 ```
+
+### AI Architecture (Chrome Built-in Gemini Nano)
+
+Chrome's AI APIs (Proofreader, Rewriter, Prompt) require a DOM context and cannot run in service workers. The extension uses an **offscreen document** as a hidden AI hub:
+
+```
+Content Script → Service Worker → Offscreen Document (AI APIs) → back
+```
+
+**Two-Phase Lint Pipeline:**
+- **Phase 1 (instant, ~50ms):** Harper + custom rules render underlines immediately
+- **Phase 2 (async, 200-2000ms):** AI Proofreader results merge in without blocking
+
+**AI APIs Used:**
+| API | Purpose | Chrome Version |
+|-----|---------|---------------|
+| [Proofreader API](https://developer.chrome.com/docs/ai/proofreader-api) | Grammar/spelling detection with explanations | 141+ (origin trial) |
+| [Rewriter API](https://developer.chrome.com/docs/ai/rewriter-api) | Sentence rephrasing with tone variants | 137+ (origin trial) |
+| [Prompt API](https://developer.chrome.com/docs/ai/prompt-api) | Fallback for text improvement | 138+ (stable) |
+
+**Requirements for AI features:** macOS 13+, Windows 10+, or Linux. 22GB free storage, GPU (4GB+ VRAM) or CPU (16GB RAM, 4+ cores). AI features are completely optional — the extension works fully without them.
 
 ### Linting Pipeline
 

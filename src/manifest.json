@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Spelling Tab",
-  "version": "1.0.0",
-  "description": "Offline grammar and spell checker powered by Harper.js",
-  "permissions": ["storage"],
+  "version": "1.1.0",
+  "description": "Offline grammar and spell checker powered by Harper.js + Chrome AI",
+  "permissions": ["storage", "offscreen"],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
