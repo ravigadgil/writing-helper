@@ -46,13 +46,13 @@ const popupBuild = esbuild.build({
   format: 'iife',
 });
 
-// Build offscreen AI hub (ESM - extension page context)
+// Build offscreen document (Prompt API needs DOM context)
 const offscreenBuild = esbuild.build({
   ...commonOptions,
   entryPoints: ['src/offscreen/offscreen.js'],
   outfile: 'dist/offscreen/offscreen.js',
   format: 'esm',
-  external: [], // no externals needed for offscreen
+  external: [],
 });
 
 await Promise.all([bgBuild, contentBuild, popupBuild, offscreenBuild]);
@@ -63,7 +63,6 @@ cpSync('src/content/styles.css', 'dist/content/styles.css');
 cpSync('src/popup/popup.html', 'dist/popup/popup.html');
 cpSync('src/popup/popup.css', 'dist/popup/popup.css');
 cpSync('src/offscreen/offscreen.html', 'dist/offscreen/offscreen.html');
-
 if (existsSync('src/icons')) {
   cpSync('src/icons', 'dist/icons', { recursive: true });
 }

@@ -32,11 +32,4 @@ export class LinterClient {
   clearCache() {
     this.cache.clear();
   }
-
-  /** Update cached lints for a specific text (used when AI results arrive async) */
-  updateCacheForText(text, lints) {
-    if (this.cache.has(text)) {
-      this.cache.set(text, lints);
-    }
-  }
 }

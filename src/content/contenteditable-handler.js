@@ -172,7 +172,7 @@ export class ContentEditableHandler {
         const rects = range.getClientRects();
         for (const rect of rects) {
           const underline = document.createElement('div');
-          const cat = lint.isAI ? 'ai' : (lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar'));
+          const cat = lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar');
           underline.className = 'spelling-tab-underline-' + cat;
           underline.style.left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
           underline.style.top = (rect.bottom - elementRect.top + element.scrollTop - 2) + 'px';
