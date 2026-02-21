@@ -353,4 +353,4 @@ No runtime dependencies beyond Harper.js. No API keys, no cloud services, no tra
 
 ## License
 
-ISC
+MIT — see [LICENSE](LICENSE) for details.

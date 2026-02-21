@@ -3,4 +3,5 @@ dist/
 .DS_Store
 *.log
 .claude/
+CLAUDE.md
 /tmp/spelling-tab-link
