@@ -24,6 +24,9 @@ document.addEventListener('input', (e) => {
     const ceParent = el.closest?.('[contenteditable="true"], [contenteditable=""]');
     if (ceParent) userHasTypedIn.add(ceParent);
   }
+  // Hide the "Tab to fix" hint while user is actively typing.
+  // It will reappear once linting finishes (after the 300ms debounce).
+  tabHint.hide();
 }, true);
 
 // Wire up suggestion popup apply callback
@@ -195,44 +198,51 @@ document.addEventListener('keydown', (e) => {
 
 // ── Sentence-level AI suggestion (Grammarly-style) ───────────────────────
 
-// Listen for sentence clicks from overlay-manager
+// Listen for sentence clicks from overlay-manager / contenteditable-handler
 document.addEventListener('spelling-tab-sentence-click', async (e) => {
-  const { sentence, anchorEl, element } = e.detail;
+  const { sentence, anchorEl, element, cachedImproved } = e.detail;
   if (!sentence || !anchorEl || !element) return;
 
   const tracked = findTrackedElementFromNode(element);
   if (!tracked) return;
 
-  // Show loading state on the sentence mark
-  anchorEl.style.setProperty('background', 'rgba(139, 92, 246, 0.2)', 'important');
-  anchorEl.style.setProperty('cursor', 'wait', 'important');
+  // Use cached AI result if available (already checked in background)
+  let improved = cachedImproved;
 
-  try {
-    const result = await chrome.runtime.sendMessage({
-      type: 'ai-improve',
-      text: sentence.text,
-    });
+  if (!improved) {
+    // Fallback: call AI now (shouldn't happen often since we pre-check)
+    anchorEl.style.setProperty('background', 'rgba(139, 92, 246, 0.2)', 'important');
+    anchorEl.style.setProperty('cursor', 'wait', 'important');
 
-    if (result?.available && result.improved && result.improved !== sentence.text) {
-      const { spanStart, spanEnd } = findSpanInField(tracked, sentence.text);
-      suggestionPopup.show({
-        span: { start: spanStart, end: spanEnd },
-        message: 'Writing suggestion',
-        lintKind: 'Enhancement',
-        lintKindPretty: 'AI Improvement',
-        category: 'style',
-        problemText: sentence.text,
-        suggestions: [{ text: result.improved, kind: 'ReplaceWith' }],
-        _aiDiff: true, // triggers diff rendering in popup
-      }, tracked.element, anchorEl);
+    try {
+      const result = await chrome.runtime.sendMessage({
+        type: 'ai-improve',
+        text: sentence.text,
+      });
+      if (result?.available && result.improved && result.improved !== sentence.text) {
+        improved = result.improved;
+      }
+    } catch (err) {
+      // silently fail
     }
-  } catch (err) {
-    // silently fail
+
+    anchorEl.style.removeProperty('background');
+    anchorEl.style.removeProperty('cursor');
   }
 
-  // Reset sentence mark style
-  anchorEl.style.removeProperty('background');
-  anchorEl.style.removeProperty('cursor');
+  if (improved) {
+    const { spanStart, spanEnd } = findSpanInField(tracked, sentence.text);
+    suggestionPopup.show({
+      span: { start: spanStart, end: spanEnd },
+      message: 'Writing suggestion',
+      lintKind: 'Enhancement',
+      lintKindPretty: 'AI Improvement',
+      category: 'style',
+      problemText: sentence.text,
+      suggestions: [{ text: improved, kind: 'ReplaceWith' }],
+      _aiDiff: true, // triggers diff rendering in popup
+    }, tracked.element, anchorEl);
+  }
 });
 
 // ── AI toolbar on text selection (Improve + Rephrase tones) ──────────────

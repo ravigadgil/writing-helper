@@ -4,6 +4,9 @@ export class OverlayManager {
     this.suggestionPopup = suggestionPopup;
     this.overlays = new Map(); // element -> { wrapper, overlay, debounceTimer, lints }
     this.onLintsChanged = null; // callback: (element, lints) => void
+    // Cache AI sentence check results: sentenceText -> { improved: string|null }
+    this._aiSentenceCache = new Map();
+    this._aiSentenceChecking = new Set();
   }
 
   attach(element) {
@@ -131,50 +134,30 @@ export class OverlayManager {
     const overlay = state.overlay;
     overlay.innerHTML = '';
 
-    // Find all sentences (5+ words) — shown even if they contain errors
+    // Find all sentences and check with AI in background
     const sentences = this.extractSentences(text);
-    state.sentences = sentences; // store for later use
+    state.sentences = sentences;
+    this._checkSentencesWithAI(sentences, element);
 
-    // Build sorted lint marks
-    const sorted = [...lints].sort((a, b) => a.span.start - b.span.start);
-
-    // Build a coverage map: ranges covered by sentence hints (excluding lint spans)
-    // For each sentence, split it around lint spans to produce non-overlapping hint fragments
-    const sentenceFragments = [];
-    sentences.forEach((sentence, i) => {
-      // Find lints that overlap this sentence
-      const overlapping = sorted.filter(l =>
-        l.span.start < sentence.end && l.span.end > sentence.start
-      );
-
-      if (overlapping.length === 0) {
-        // No lints overlap — whole sentence is a hint
-        sentenceFragments.push({ start: sentence.start, end: sentence.end, sentence, index: i });
-      } else {
-        // Split sentence around lint spans
-        let cursor = sentence.start;
-        for (const lint of overlapping) {
-          const lintStart = Math.max(lint.span.start, sentence.start);
-          const lintEnd = Math.min(lint.span.end, sentence.end);
-          if (cursor < lintStart) {
-            sentenceFragments.push({ start: cursor, end: lintStart, sentence, index: i });
-          }
-          cursor = Math.max(cursor, lintEnd);
-        }
-        if (cursor < sentence.end) {
-          sentenceFragments.push({ start: cursor, end: sentence.end, sentence, index: i });
-        }
-      }
-    });
-
-    // Merge lint marks and sentence fragment marks into one sorted list
+    // Build marks: lints + AI changed-word highlights
     const marks = [];
+
+    // Add lint marks
+    const sorted = [...lints].sort((a, b) => a.span.start - b.span.start);
     sorted.forEach((lint, i) => {
       marks.push({ type: 'lint', start: lint.span.start, end: lint.span.end, lint, index: i });
     });
-    sentenceFragments.forEach((frag) => {
-      marks.push({ type: 'sentence', start: frag.start, end: frag.end, sentence: frag.sentence, index: frag.index });
-    });
+
+    // Add AI changed-word marks (only specific words, not full sentences)
+    const confirmedSentences = sentences.filter(s => this._aiSentenceCache.has(s.text));
+    for (const sentence of confirmedSentences) {
+      const cached = this._aiSentenceCache.get(sentence.text);
+      if (!cached?.improved) continue;
+      const changedRanges = this._findChangedWordRanges(sentence.text, cached.improved, sentence.start);
+      for (const cr of changedRanges) {
+        marks.push({ type: 'sentence', start: cr.start, end: cr.end, sentence });
+      }
+    }
 
     marks.sort((a, b) => a.start - b.start || (a.type === 'lint' ? -1 : 1));
 
@@ -182,13 +165,10 @@ export class OverlayManager {
 
     let lastIndex = 0;
     marks.forEach((mark) => {
-      // Skip if this mark starts before our cursor (overlap case)
       if (mark.start < lastIndex) return;
 
       if (mark.start > lastIndex) {
-        overlay.appendChild(
-          document.createTextNode(text.substring(lastIndex, mark.start))
-        );
+        overlay.appendChild(document.createTextNode(text.substring(lastIndex, mark.start)));
       }
 
       const el = document.createElement('mark');
@@ -206,16 +186,17 @@ export class OverlayManager {
           this.suggestionPopup.show(mark.lint, element, el);
         });
       } else {
-        // Sentence hint — subtle purple highlight (fragment of a sentence)
+        // AI changed-word highlight
         el.className = 'spelling-tab-sentence-hint';
         el.textContent = text.substring(mark.start, mark.end);
-        el.dataset.sentenceIndex = String(mark.index);
-        // Click dispatches custom event that content-script listens to
+        el.style.pointerEvents = 'auto';
+        el.style.cursor = 'pointer';
         el.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
+          const cached = this._aiSentenceCache.get(mark.sentence.text);
           document.dispatchEvent(new CustomEvent('spelling-tab-sentence-click', {
-            detail: { sentence: mark.sentence, anchorEl: el, element },
+            detail: { sentence: mark.sentence, anchorEl: el, element, cachedImproved: cached?.improved },
           }));
         });
       }
@@ -232,11 +213,112 @@ export class OverlayManager {
     overlay.scrollLeft = element.scrollLeft;
   }
 
+  /**
+   * Check sentences with AI in the background.
+   * Only checks sentences not already cached or in-flight.
+   */
+  async _checkSentencesWithAI(sentences, element) {
+    for (const sentence of sentences) {
+      if (this._aiSentenceCache.has(sentence.text)) continue;
+      if (this._aiSentenceChecking.has(sentence.text)) continue;
+
+      this._aiSentenceChecking.add(sentence.text);
+
+      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentence.text })
+        .then(result => {
+          this._aiSentenceChecking.delete(sentence.text);
+          if (result?.available && result.improved && result.improved !== sentence.text) {
+            this._aiSentenceCache.set(sentence.text, { improved: result.improved });
+            // Re-render to show the new highlight
+            const state = this.overlays.get(element);
+            if (state) this.renderOverlay(element, element.value, state.lints);
+          }
+        })
+        .catch(() => {
+          this._aiSentenceChecking.delete(sentence.text);
+        });
+    }
+  }
+
+  /**
+   * Find character ranges in the original sentence where words differ from improved.
+   * Returns array of { start, end } (absolute offsets in the full text).
+   */
+  _findChangedWordRanges(original, improved, sentenceOffset) {
+    const origWords = original.match(/\S+/g) || [];
+    const impWords = improved.match(/\S+/g) || [];
+    const ranges = [];
+
+    // Build LCS to find matching words
+    const lcs = this._lcsWords(origWords, impWords);
+    const lcsSet = new Set(lcs.map(m => m.origIdx));
+
+    // Any original word NOT in the LCS is "changed"
+    let searchFrom = 0;
+    for (let i = 0; i < origWords.length; i++) {
+      if (lcsSet.has(i)) continue;
+      const wordStart = original.indexOf(origWords[i], searchFrom);
+      if (wordStart === -1) continue;
+      const wordEnd = wordStart + origWords[i].length;
+      ranges.push({ start: sentenceOffset + wordStart, end: sentenceOffset + wordEnd });
+      searchFrom = wordEnd;
+    }
+
+    return ranges;
+  }
+
+  /**
+   * Compute LCS of two word arrays. Returns array of { origIdx, impIdx }.
+   */
+  _lcsWords(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1].toLowerCase() === b[j - 1].toLowerCase()) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 && j > 0) {
+      if (a[i - 1].toLowerCase() === b[j - 1].toLowerCase()) {
+        result.unshift({ origIdx: i - 1, impIdx: j - 1 });
+        i--; j--;
+      } else if (dp[i - 1][j] > dp[i][j - 1]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+    return result;
+  }
+
   applyAllFixes(element) {
     const state = this.overlays.get(element);
     if (!state || state.lints.length === 0) return false;
 
-    const fixable = state.lints.filter(l => l.suggestions.length > 0);
+    // Find paragraph around cursor
+    const cursorPos = element.selectionStart ?? -1;
+    let paraStart = 0;
+    let paraEnd = element.value.length;
+    if (cursorPos >= 0) {
+      const text = element.value;
+      const nlBefore = text.lastIndexOf('\n', cursorPos - 1);
+      paraStart = nlBefore === -1 ? 0 : nlBefore + 1;
+      const nlAfter = text.indexOf('\n', cursorPos);
+      paraEnd = nlAfter === -1 ? text.length : nlAfter;
+    }
+
+    // Only fix lints within the cursor's paragraph
+    const fixable = state.lints.filter(l =>
+      l.suggestions.length > 0 &&
+      l.span.start >= paraStart &&
+      l.span.end <= paraEnd
+    );
     if (fixable.length === 0) return false;
 
     let text = element.value;

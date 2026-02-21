@@ -202,12 +202,20 @@ async function handleMessage(message, sender) {
         // Sort by position in text
         allLints.sort((a, b) => a.span.start - b.span.start);
 
-        // Store lints for this tab so popup can access them
+        // Store lints for this tab so popup can access them.
+        // Use tabId+frameId as key so multiple frames don't overwrite each other.
         const tabId = sender.tab?.id;
+        const frameId = sender.frameId ?? 0;
         if (tabId) {
-          tabLints.set(tabId, allLints);
+          if (!tabLints.has(tabId)) tabLints.set(tabId, new Map());
+          const frameLints = tabLints.get(tabId);
+          frameLints.set(frameId, allLints);
+
+          // Aggregate all lints across all frames for the badge count
+          let totalCount = 0;
+          for (const fl of frameLints.values()) totalCount += fl.length;
           chrome.action.setBadgeText({
-            text: allLints.length > 0 ? String(allLints.length) : '',
+            text: totalCount > 0 ? String(totalCount) : '',
             tabId,
           });
           chrome.action.setBadgeBackgroundColor({ color: '#e74c3c' });
@@ -221,9 +229,12 @@ async function handleMessage(message, sender) {
     }
 
     case 'get-lints': {
-      // Popup requests current lints for a tab
-      const lints = tabLints.get(message.tabId) || [];
-      return { lints };
+      // Popup requests current lints for a tab — aggregate across all frames
+      const frameLints = tabLints.get(message.tabId);
+      if (!frameLints) return { lints: [] };
+      const allLints = [];
+      for (const fl of frameLints.values()) allLints.push(...fl);
+      return { lints: allLints };
     }
     case 'ai-improve':
       return sendToOffscreen({ type: 'ai-improve', text: message.text });

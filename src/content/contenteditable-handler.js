@@ -4,6 +4,9 @@ export class ContentEditableHandler {
     this.suggestionPopup = suggestionPopup;
     this.tracked = new Map(); // element -> { container, debounceTimer, lints, text, nodeMap }
     this.onLintsChanged = null; // callback: (element, lints) => void
+    // Cache AI sentence check results: sentenceText -> { improved: string|null }
+    this._aiSentenceCache = new Map();
+    this._aiSentenceChecking = new Set(); // sentences currently being checked
   }
 
   attach(element) {
@@ -145,6 +148,26 @@ export class ContentEditableHandler {
     return { text, nodeMap };
   }
 
+  /**
+   * Extract sentence boundaries from text.
+   * Returns array of { start, end, text } for sentences with 5+ words.
+   */
+  extractSentences(text) {
+    const sentences = [];
+    const re = /[^.!?\n]+[.!?]*/g;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      const s = match[0].trim();
+      const wordCount = s.split(/\s+/).length;
+      if (wordCount >= 5) {
+        const start = match.index;
+        const end = match.index + match[0].length;
+        sentences.push({ start, end, text: s });
+      }
+    }
+    return sentences;
+  }
+
   renderUnderlines(element) {
     const state = this.tracked.get(element);
     if (!state) return;
@@ -152,13 +175,14 @@ export class ContentEditableHandler {
     // Ensure container is still in DOM
     this.ensureContainer(element);
 
-    const { container, lints, nodeMap } = state;
+    const { container, lints, nodeMap, text } = state;
     container.innerHTML = '';
 
-    if (!lints.length || !nodeMap?.length) return;
+    if (!nodeMap?.length) return;
 
     const elementRect = element.getBoundingClientRect();
 
+    // ── Render lint underlines ──────────────────────────────────
     lints.forEach((lint, lintIndex) => {
       try {
         const range = document.createRange();
@@ -191,6 +215,147 @@ export class ContentEditableHandler {
         // Range operations can fail if DOM changed; skip this lint
       }
     });
+
+    // ── Render sentence-level AI suggestion highlights ──────────
+    // Only highlight the specific WORDS that AI wants to change, not full sentences.
+    if (!text) return;
+    const sentences = this.extractSentences(text);
+    state.sentences = sentences;
+
+    // Check sentences with AI in the background (non-blocking)
+    this._checkSentencesWithAI(sentences, element);
+
+    // Only render highlights for sentences that AI has confirmed
+    const confirmedSentences = sentences.filter(s => this._aiSentenceCache.has(s.text));
+
+    confirmedSentences.forEach((sentence) => {
+      const cached = this._aiSentenceCache.get(sentence.text);
+      if (!cached?.improved) return;
+
+      // Find which words in the original sentence are changed by the AI
+      const changedRanges = this._findChangedWordRanges(sentence.text, cached.improved, sentence.start);
+
+      for (const cr of changedRanges) {
+        try {
+          const range = document.createRange();
+          const startInfo = this.findNodeAtOffset(nodeMap, cr.start);
+          const endInfo = this.findNodeAtOffset(nodeMap, cr.end);
+          if (!startInfo || !endInfo) continue;
+
+          range.setStart(startInfo.node, cr.start - startInfo.start);
+          range.setEnd(endInfo.node, Math.min(cr.end - endInfo.start, endInfo.node.textContent.length));
+
+          const rects = range.getClientRects();
+          for (const rect of rects) {
+            const highlight = document.createElement('div');
+            highlight.className = 'spelling-tab-underline-sentence';
+            highlight.style.left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
+            highlight.style.top = (rect.bottom - elementRect.top + element.scrollTop - 1) + 'px';
+            highlight.style.width = rect.width + 'px';
+
+            highlight.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              document.dispatchEvent(new CustomEvent('spelling-tab-sentence-click', {
+                detail: { sentence, anchorEl: highlight, element, cachedImproved: cached.improved },
+              }));
+            });
+
+            container.appendChild(highlight);
+          }
+        } catch (err) {
+          // Range operations can fail if DOM changed; skip
+        }
+      }
+    });
+  }
+
+  /**
+   * Find character ranges in the original sentence where words differ from the improved version.
+   * Returns array of { start, end } (absolute offsets in the full text).
+   */
+  _findChangedWordRanges(original, improved, sentenceOffset) {
+    const origWords = original.match(/\S+/g) || [];
+    const impWords = improved.match(/\S+/g) || [];
+    const ranges = [];
+
+    // Build LCS to find matching words
+    const lcs = this._lcsWords(origWords, impWords);
+    const lcsSet = new Set(lcs.map(m => m.origIdx));
+
+    // Any original word NOT in the LCS is "changed" — highlight it
+    let searchFrom = 0;
+    for (let i = 0; i < origWords.length; i++) {
+      if (lcsSet.has(i)) continue;
+
+      // Find the position of this word in the original text
+      const wordStart = original.indexOf(origWords[i], searchFrom);
+      if (wordStart === -1) continue;
+      const wordEnd = wordStart + origWords[i].length;
+      ranges.push({ start: sentenceOffset + wordStart, end: sentenceOffset + wordEnd });
+      searchFrom = wordEnd;
+    }
+
+    return ranges;
+  }
+
+  /**
+   * Compute LCS of two word arrays. Returns array of { origIdx, impIdx }.
+   */
+  _lcsWords(a, b) {
+    const m = a.length, n = b.length;
+    const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1].toLowerCase() === b[j - 1].toLowerCase()) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+    // Backtrack
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 && j > 0) {
+      if (a[i - 1].toLowerCase() === b[j - 1].toLowerCase()) {
+        result.unshift({ origIdx: i - 1, impIdx: j - 1 });
+        i--; j--;
+      } else if (dp[i - 1][j] > dp[i][j - 1]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Check sentences with AI in the background.
+   * Only checks sentences not already cached or in-flight.
+   * When a result arrives, re-renders underlines to show/hide highlights.
+   */
+  async _checkSentencesWithAI(sentences, element) {
+    for (const sentence of sentences) {
+      if (this._aiSentenceCache.has(sentence.text)) continue;
+      if (this._aiSentenceChecking.has(sentence.text)) continue;
+
+      this._aiSentenceChecking.add(sentence.text);
+
+      // Fire and forget — re-render when result comes back
+      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentence.text })
+        .then(result => {
+          this._aiSentenceChecking.delete(sentence.text);
+          if (result?.available && result.improved && result.improved !== sentence.text) {
+            this._aiSentenceCache.set(sentence.text, { improved: result.improved });
+            // Re-render to show the new highlight
+            this.renderUnderlines(element);
+          }
+        })
+        .catch(() => {
+          this._aiSentenceChecking.delete(sentence.text);
+        });
+    }
   }
 
   findNodeAtOffset(nodeMap, offset) {
@@ -208,17 +373,103 @@ export class ContentEditableHandler {
     return null;
   }
 
+  /**
+   * Find the paragraph (newline-delimited block) boundaries around a given offset.
+   */
+  _getParagraphRange(text, cursorOffset) {
+    let start = text.lastIndexOf('\n', cursorOffset - 1);
+    start = start === -1 ? 0 : start + 1;
+    let end = text.indexOf('\n', cursorOffset);
+    if (end === -1) end = text.length;
+    return { start, end };
+  }
+
+  /**
+   * Get the cursor offset in the flat text map, or -1 if cursor is not in this element.
+   */
+  getCursorOffset(element) {
+    const state = this.tracked.get(element);
+    if (!state) return -1;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return -1;
+
+    const range = sel.getRangeAt(0);
+    const cursorNode = range.startContainer;
+    const cursorNodeOffset = range.startOffset;
+
+    // Find this node in our nodeMap
+    for (const entry of state.nodeMap) {
+      if (entry.synthetic) continue;
+      if (entry.node === cursorNode) {
+        return entry.start + cursorNodeOffset;
+      }
+    }
+    return -1;
+  }
+
   applyAllFixes(element) {
     const state = this.tracked.get(element);
     if (!state || state.lints.length === 0) return false;
 
-    const fixable = state.lints.filter(l => l.suggestions.length > 0);
+    // Find which paragraph the cursor is in
+    const cursorOffset = this.getCursorOffset(element);
+    let paraRange = null;
+    if (cursorOffset >= 0 && state.text) {
+      paraRange = this._getParagraphRange(state.text, cursorOffset);
+    }
+
+    // Only fix lints within the cursor's paragraph (or all if cursor not found)
+    const fixable = state.lints.filter(l => {
+      if (l.suggestions.length === 0) return false;
+      if (paraRange) {
+        return l.span.start >= paraRange.start && l.span.end <= paraRange.end;
+      }
+      return true;
+    });
     if (fixable.length === 0) return false;
 
-    // Apply fixes in reverse order (last to first) so span offsets stay valid
-    const sorted = [...fixable].sort((a, b) => b.span.start - a.span.start);
-    for (const lint of sorted) {
-      this._applyRangedFix(element, state, lint, lint.suggestions[0]);
+    // Collect the original problem text and replacement for each fix.
+    // We'll apply them one at a time, re-finding each in the live text,
+    // so that DOM structure (paragraphs, line breaks) is preserved.
+    const fixes = fixable
+      .map(l => ({
+        problem: state.text.substring(l.span.start, l.span.end),
+        replacement: l.suggestions[0].text,
+        span: { ...l.span },
+      }))
+      .sort((a, b) => b.span.start - a.span.start); // reverse order
+
+    for (const fix of fixes) {
+      // Rebuild text map to get fresh DOM state
+      const { text, nodeMap } = this.buildTextMap(element);
+      state.text = text;
+      state.nodeMap = nodeMap;
+
+      // Find the problem text in the current text
+      const idx = text.indexOf(fix.problem);
+      if (idx === -1) continue;
+
+      const synthLint = { span: { start: idx, end: idx + fix.problem.length } };
+      try {
+        const startInfo = this.findNodeAtOffset(nodeMap, synthLint.span.start);
+        const endInfo = this.findNodeAtOffset(nodeMap, synthLint.span.end);
+        if (!startInfo || !endInfo) continue;
+
+        element.focus();
+        const range = document.createRange();
+        range.setStart(startInfo.node, synthLint.span.start - startInfo.start);
+        range.setEnd(endInfo.node, Math.min(synthLint.span.end - endInfo.start, endInfo.node.textContent.length));
+
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, fix.replacement);
+
+        this.ensureContainer(element);
+      } catch (err) {
+        // Skip this fix if it fails
+      }
     }
 
     this.linterClient.clearCache();

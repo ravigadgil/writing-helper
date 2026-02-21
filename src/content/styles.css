@@ -282,34 +282,49 @@
 
 /* ── Sentence-level AI suggestion (Grammarly-style) ─────────────────── */
 
-/* Purple highlight on sentence hover in textarea overlay */
+/* Purple highlight on whole sentence in textarea overlay.
+   Sentence <mark> wraps the full sentence, with lint <mark> nested inside. */
 .spelling-tab-sentence-hint {
-  background: rgba(139, 92, 246, 0.08) !important;
+  background: rgba(139, 92, 246, 0.12) !important;
   color: transparent !important;
-  border-bottom: 2px solid rgba(139, 92, 246, 0.3) !important;
+  text-decoration: underline solid rgba(139, 92, 246, 0.5) !important;
+  text-decoration-thickness: 2.5px !important;
+  text-underline-offset: 3px !important;
+  text-decoration-skip-ink: none !important;
   pointer-events: auto !important;
   cursor: pointer !important;
-  border-radius: 2px !important;
-  transition: background 0.15s, border-color 0.15s !important;
+  border-radius: 0 !important;
+  transition: background 0.15s, text-decoration-color 0.15s !important;
 }
 
 .spelling-tab-sentence-hint:hover {
-  background: rgba(139, 92, 246, 0.15) !important;
-  border-bottom-color: rgba(139, 92, 246, 0.6) !important;
+  background: rgba(139, 92, 246, 0.20) !important;
+  text-decoration-color: rgba(139, 92, 246, 0.8) !important;
+}
+
+/* Lint marks nested inside a sentence hint — override transparent color,
+   keep their own wavy underline, and allow clicking through to lint popup */
+.spelling-tab-sentence-hint .spelling-tab-error-spelling,
+.spelling-tab-sentence-hint .spelling-tab-error-grammar,
+.spelling-tab-sentence-hint .spelling-tab-error-style {
+  color: transparent !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
 }
 
 /* Purple underline for contenteditable sentence hints */
 .spelling-tab-underline-sentence {
   position: absolute !important;
-  height: 2px !important;
-  background: rgba(139, 92, 246, 0.4) !important;
+  height: 2.5px !important;
+  background: rgba(139, 92, 246, 0.5) !important;
   pointer-events: auto !important;
   cursor: pointer !important;
   transition: background 0.15s !important;
+  border-radius: 1px !important;
 }
 
 .spelling-tab-underline-sentence:hover {
-  background: rgba(139, 92, 246, 0.7) !important;
+  background: rgba(139, 92, 246, 0.85) !important;
 }
 
 /* ── Diff popup (Grammarly-style word diff) ─────────────────────────── */

@@ -59,10 +59,20 @@ export class TabHint {
         range.insertNode(span);
         const rect = span.getBoundingClientRect();
         const pos = { left: rect.right, top: rect.top, bottom: rect.bottom };
+        // Remember parent and offset before removing
+        const parent = span.parentNode;
+        const offset = Array.from(parent.childNodes).indexOf(span);
         span.remove();
-        // Restore selection
-        sel.removeAllRanges();
-        sel.addRange(range);
+        // Restore selection with a fresh range
+        try {
+          const newRange = document.createRange();
+          newRange.setStart(parent, Math.min(offset, parent.childNodes.length));
+          newRange.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(newRange);
+        } catch (_) {
+          // Silently ignore if restore fails
+        }
         return pos;
       } catch (e) {
         return null;
