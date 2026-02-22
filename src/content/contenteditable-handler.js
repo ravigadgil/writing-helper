@@ -468,9 +468,13 @@ export class ContentEditableHandler {
       paraRange = this._getParagraphRange(state.text, cursorOffset);
     }
 
-    // Only fix lints within the cursor's paragraph (or all if cursor not found)
+    // Only fix lints within the cursor's paragraph (or all if cursor not found).
+    // Also skip any lint that spans across a newline — applying those would merge paragraphs.
     const fixable = state.lints.filter(l => {
       if (l.suggestions.length === 0) return false;
+      // Never auto-fix lints that cross paragraph boundaries
+      const lintText = state.text.substring(l.span.start, l.span.end);
+      if (lintText.includes('\n')) return false;
       if (paraRange) {
         return l.span.start >= paraRange.start && l.span.end <= paraRange.end;
       }

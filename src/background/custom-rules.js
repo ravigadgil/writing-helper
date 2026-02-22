@@ -1195,8 +1195,9 @@ function detectRunOnClauses(text, occupied) {
   // Pattern: a word (end of one clause), space, then subject + verb (new clause)
   // WITHOUT a comma or conjunction before it.
   // We specifically look for cases where the preceding character is a letter (not , ; . !)
+  // Use [^\S\n] (whitespace but NOT newline) to avoid matching across paragraph boundaries.
   const pattern = new RegExp(
-    `([a-z]+)\\s+(${subjects})\\s+(${verbs})\\b`,
+    `([a-z]+)[^\\S\\n]+(${subjects})[^\\S\\n]+(${verbs})\\b`,
     'gi'
   );
 
@@ -1265,7 +1266,7 @@ function detectRunOnClauses(text, occupied) {
   const imperativeVerbs = "keep|eat|take|make|give|get|put|let|try|go|come|run|stop|start|open|close|turn|pick|hold|bring|send|tell|ask|look|watch|check|read|write|call|find|set|cut|buy|sell|show|help|leave|move|use|play|pay|add|fix|clean|break|push|pull|throw|catch|drop|wait|sit|stand|walk|talk|listen|remember|forget|consider|imagine|think|see|feel|note|mark|follow|save|grab|pass|hand|build|draw|learn|teach|meet|join|choose|decide|plan|avoid|allow|accept|enjoy|finish|handle|manage|count|measure|sort|fill|share|post|sign|press|click|type|log|enter|remove|delete|create|update|select|change|replace";
 
   const imperativePattern = new RegExp(
-    `([a-z]+)\\s+(${imperativeVerbs})\\s+(a|an|the|my|your|his|her|its|our|their|some|any|this|that|these|those|each|every|all|no|more|up|down|out|in|off|on|over|back|away|it|me|him|her|us|them|yourself|himself|herself|itself|ourselves|themselves)\\b`,
+    `([a-z]+)[^\\S\\n]+(${imperativeVerbs})[^\\S\\n]+(a|an|the|my|your|his|her|its|our|their|some|any|this|that|these|those|each|every|all|no|more|up|down|out|in|off|on|over|back|away|it|me|him|her|us|them|yourself|himself|herself|itself|ourselves|themselves)\\b`,
     'gi'
   );
 
