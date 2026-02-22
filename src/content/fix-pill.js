@@ -1,3 +1,5 @@
+import { CE_SELECTOR } from './element-detector.js';
+
 /**
  * Tiny "Tab to fix" hint that appears right after the user's blinking cursor.
  * Only shown when there are fixable errors and the user has typed.
@@ -41,8 +43,8 @@ export class TabHint {
     if (!active) return null;
 
     // ContentEditable
-    if (active.matches?.('[contenteditable="true"], [contenteditable=""]') ||
-        active.closest?.('[contenteditable="true"], [contenteditable=""]')) {
+    if (active.matches?.(CE_SELECTOR) ||
+        active.closest?.(CE_SELECTOR)) {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
       const range = sel.getRangeAt(0).cloneRange();

@@ -3,7 +3,7 @@ import { SuggestionPopup } from './suggestion-popup.js';
 import { OverlayManager } from './overlay-manager.js';
 import { ContentEditableHandler } from './contenteditable-handler.js';
 import { TabHint } from './fix-pill.js';
-import { ElementDetector } from './element-detector.js';
+import { ElementDetector, CE_SELECTOR } from './element-detector.js';
 
 const linterClient = new LinterClient();
 const suggestionPopup = new SuggestionPopup();
@@ -35,7 +35,7 @@ document.addEventListener('input', (e) => {
   const el = e.target;
   if (el) userHasTypedIn.add(el);
   if (el) {
-    const ceParent = el.closest?.('[contenteditable="true"], [contenteditable=""]');
+    const ceParent = el.closest?.(CE_SELECTOR);
     if (ceParent) userHasTypedIn.add(ceParent);
   }
   // Hide the "Tab to fix" hint while user is actively typing.
@@ -46,7 +46,7 @@ document.addEventListener('input', (e) => {
 // Wire up suggestion popup apply callback
 suggestionPopup.onApply = (element, lint, suggestion) => {
   tabHint.hide();
-  if (element.matches('[contenteditable="true"], [contenteditable=""]')) {
+  if (element.matches(CE_SELECTOR)) {
     ceHandler.applySingleFix(element, lint, suggestion);
   } else {
     overlayManager.applySingleFix(element, lint, suggestion);
@@ -93,7 +93,7 @@ document.addEventListener('focusout', () => {
     }
     const isTrackedOverlay = overlayManager.overlays.has(active);
     const isTrackedCE = ceHandler.tracked.has(active) ||
-      active.closest?.('[contenteditable="true"], [contenteditable=""]');
+      active.closest?.(CE_SELECTOR);
     if (!isTrackedOverlay && !isTrackedCE) {
       tabHint.hide();
     }
@@ -129,7 +129,7 @@ function getActiveTrackedElement() {
       if (ceHandler.tracked.has(el)) return { type: 'ce', element: el };
       el = el.parentElement;
     }
-    const ceAncestor = active.closest?.('[contenteditable="true"], [contenteditable=""]');
+    const ceAncestor = active.closest?.(CE_SELECTOR);
     if (ceAncestor && ceHandler.tracked.has(ceAncestor)) {
       return { type: 'ce', element: ceAncestor };
     }
@@ -269,6 +269,27 @@ chrome.storage.local.get('lastAITone', (result) => {
   if (result.lastAITone) lastUsedTone = result.lastAITone;
 });
 
+/**
+ * Get the current text selection, supporting Shadow DOM.
+ * `window.getSelection()` may not return selections inside shadow roots
+ * on all browsers, so we also try to get it from the active shadow root.
+ */
+function getSelectionSafe() {
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) return sel;
+
+  // Fallback: try to get selection from the active element's shadow root
+  const active = document.activeElement;
+  if (active?.shadowRoot && typeof active.shadowRoot.getSelection === 'function') {
+    try {
+      const shadowSel = active.shadowRoot.getSelection();
+      if (shadowSel && !shadowSel.isCollapsed) return shadowSel;
+    } catch (_) {}
+  }
+
+  return sel;
+}
+
 function createAIToolbar() {
   if (aiToolbar) return aiToolbar;
   aiToolbar = document.createElement('div');
@@ -283,18 +304,36 @@ function hideAIToolbar() {
 }
 
 function findTrackedElementFromNode(node) {
+  // Walk up from node to find a tracked element
   let el = node;
   while (el) {
     if (overlayManager.overlays.has(el)) return { type: 'overlay', element: el };
-    el = el.parentElement;
-  }
-  el = node;
-  while (el) {
     if (ceHandler.tracked.has(el)) return { type: 'ce', element: el };
-    const ceAncestor = el.closest?.('[contenteditable="true"], [contenteditable=""]');
-    if (ceAncestor && ceHandler.tracked.has(ceAncestor)) return { type: 'ce', element: ceAncestor };
     el = el.parentElement;
   }
+
+  // Try closest() within the same tree (works within shadow roots)
+  if (node instanceof HTMLElement || node?.parentElement) {
+    const startEl = node instanceof HTMLElement ? node : node.parentElement;
+    if (startEl) {
+      const ceAncestor = startEl.closest?.(CE_SELECTOR);
+      if (ceAncestor && ceHandler.tracked.has(ceAncestor)) {
+        return { type: 'ce', element: ceAncestor };
+      }
+    }
+  }
+
+  // Fallback: check the active element's shadow root host chain
+  const active = document.activeElement;
+  if (active?.shadowRoot) {
+    // The active element is a shadow host — check elements tracked inside it
+    for (const [trackedEl] of ceHandler.tracked) {
+      if (active.shadowRoot.contains(trackedEl)) {
+        return { type: 'ce', element: trackedEl };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -355,26 +394,10 @@ async function handleAIAction(actionType, tone, selectedText, tracked, anchorEl)
   return false;
 }
 
-document.addEventListener('mouseup', (e) => {
-  if (aiToolbar && aiToolbar.contains(e.target)) return;
-
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) {
-    hideAIToolbar();
-    return;
-  }
-
-  const anchor = sel.anchorNode;
-  const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
-  if (!el) { hideAIToolbar(); return; }
-
-  const tracked = findTrackedElementFromNode(el);
-  if (!tracked) { hideAIToolbar(); return; }
-
-  const selectedText = sel.toString().trim();
-  const range = sel.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
-
+/**
+ * Show the AI toolbar for a given selection, tracked element, and bounding rect.
+ */
+function showAIToolbarForSelection(selectedText, tracked, rect) {
   const toolbar = createAIToolbar();
   toolbar.innerHTML = '';
 
@@ -443,18 +466,78 @@ document.addEventListener('mouseup', (e) => {
       toolbar.style.setProperty('top', (rect.bottom + 4 + window.scrollY) + 'px', 'important');
     }
   });
+}
+
+/**
+ * Try to get selection and show AI toolbar.
+ * Works for both main document and shadow DOM selections.
+ */
+function tryShowAIToolbar(sel) {
+  if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) {
+    hideAIToolbar();
+    return;
+  }
+
+  const anchor = sel.anchorNode;
+  const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+  if (!el) { hideAIToolbar(); return; }
+
+  const tracked = findTrackedElementFromNode(el);
+  if (!tracked) { hideAIToolbar(); return; }
+
+  const selectedText = sel.toString().trim();
+  const range = sel.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+
+  showAIToolbarForSelection(selectedText, tracked, rect);
+}
+
+document.addEventListener('mouseup', (e) => {
+  if (aiToolbar && aiToolbar.contains(e.target)) return;
+  tryShowAIToolbar(getSelectionSafe());
 });
 
 document.addEventListener('mousedown', (e) => {
   if (aiToolbar && !aiToolbar.contains(e.target)) hideAIToolbar();
 });
 
+// ── Shadow DOM: install mouseup listeners on tracked contenteditable elements ──
+// window.getSelection() may not return selections inside shadow roots.
+// By listening for mouseup directly on the element, we can get the selection
+// from the element's root node, which works reliably in shadow DOM.
+const _shadowMouseupElements = new WeakSet();
+
+// Hook into ceHandler to install mouseup listeners when elements are attached
+const _origCeAttach = ceHandler.attach.bind(ceHandler);
+ceHandler.attach = function(element) {
+  _origCeAttach(element);
+  // If this element is inside a shadow root, add a direct mouseup listener
+  const root = element.getRootNode();
+  if (root instanceof ShadowRoot && !_shadowMouseupElements.has(element)) {
+    _shadowMouseupElements.add(element);
+    element.addEventListener('mouseup', () => {
+      // Short delay to let the selection finalize
+      setTimeout(() => {
+        // Try getting selection from the shadow root first
+        let sel = window.getSelection();
+        if (!sel || sel.isCollapsed) {
+          // Try shadow root's getSelection (non-standard, Chrome only)
+          if (typeof root.getSelection === 'function') {
+            try { sel = root.getSelection(); } catch (_) {}
+          }
+        }
+        tryShowAIToolbar(sel);
+      }, 10);
+    });
+  }
+};
+
 // ── Keyboard shortcut: Ctrl+Shift+I to improve selected text with AI ─────
 
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey && e.shiftKey && e.key === 'I')) return;
 
-  const sel = window.getSelection();
+  const sel = getSelectionSafe();
   if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) return;
 
   const anchor = sel.anchorNode;

@@ -7,13 +7,16 @@ export class ContentEditableHandler {
     // Cache AI sentence check results: sentenceText -> { improved: string|null }
     this._aiSentenceCache = new Map();
     this._aiSentenceChecking = new Set(); // sentences currently being checked
+    this._styledShadowRoots = new WeakSet(); // shadow roots we've already injected CSS into
   }
 
   attach(element) {
     if (this.tracked.has(element)) return;
 
-    const container = document.createElement('div');
-    container.className = 'spelling-tab-ce-container';
+    // If element is inside a shadow root, inject our styles there
+    this._ensureShadowStyles(element);
+
+    const container = this._createStyledContainer();
 
     const parentStyle = window.getComputedStyle(element);
     if (parentStyle.position === 'static') {
@@ -29,6 +32,74 @@ export class ContentEditableHandler {
   }
 
   /**
+   * Create the overlay container with inline fallback styles.
+   * Inline styles ensure visibility even when CSS hasn't loaded in shadow DOM.
+   */
+  _createStyledContainer() {
+    const container = document.createElement('div');
+    container.className = 'spelling-tab-ce-container';
+    container.style.cssText = [
+      'position: absolute',
+      'top: 0',
+      'left: 0',
+      'width: 100%',
+      'height: 100%',
+      'pointer-events: none',
+      'overflow: hidden',
+      'z-index: 10000',
+    ].join(' !important;') + ' !important;';
+    return container;
+  }
+
+  /**
+   * If the element lives inside a Shadow DOM, inject our extension CSS
+   * into that shadow root so underlines and overlays render correctly.
+   * Content script CSS only applies to the main document — shadow roots
+   * are isolated from external styles.
+   *
+   * Uses a <link> tag (loaded by the browser) instead of fetch() for reliability.
+   * Also triggers a re-render once CSS loads so underlines pick up full styles.
+   */
+  _ensureShadowStyles(element) {
+    const root = element.getRootNode();
+    if (!(root instanceof ShadowRoot)) return;
+    if (this._styledShadowRoots.has(root)) return;
+    this._styledShadowRoots.add(root);
+
+    const cssUrl = chrome.runtime.getURL('content/styles.css');
+
+    // Primary: <link> tag (browser handles loading)
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = cssUrl;
+    link.setAttribute('data-writing-helper', 'true');
+    link.onload = () => {
+      // Re-render underlines now that CSS is available
+      if (this.tracked.has(element)) {
+        this.renderUnderlines(element);
+      }
+    };
+    root.appendChild(link);
+
+    // Fallback: also try fetch + inline <style> (in case <link> doesn't work)
+    fetch(cssUrl)
+      .then(r => r.text())
+      .then(cssText => {
+        // Only inject if <link> didn't already load
+        if (!root.querySelector('link[data-writing-helper]')?.sheet) {
+          const style = document.createElement('style');
+          style.setAttribute('data-writing-helper-fallback', 'true');
+          style.textContent = cssText;
+          root.appendChild(style);
+          if (this.tracked.has(element)) {
+            this.renderUnderlines(element);
+          }
+        }
+      })
+      .catch(() => {});
+  }
+
+  /**
    * Ensure the overlay container is still inside the element.
    * After execCommand('insertText'), the container may get destroyed.
    */
@@ -38,8 +109,7 @@ export class ContentEditableHandler {
 
     // Check if container is still in the DOM and inside this element
     if (!element.contains(state.container)) {
-      const container = document.createElement('div');
-      container.className = 'spelling-tab-ce-container';
+      const container = this._createStyledContainer();
       element.appendChild(container);
       state.container = container;
     }
@@ -74,10 +144,15 @@ export class ContentEditableHandler {
     // so we don't double-count.
     const blockBreakInserted = new Set();
 
-    const blockTags = new Set([
-      'DIV', 'P', 'BR', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-      'BLOCKQUOTE', 'PRE', 'OL', 'UL', 'TR', 'SECTION', 'ARTICLE',
-      'HEADER', 'FOOTER', 'ASIDE', 'NAV', 'MAIN', 'FIGURE',
+    // Known inline HTML elements — everything else (including custom elements
+    // like Reddit's <shreddit-*> Lit components) is treated as a block boundary.
+    // This prevents word concatenation when sites use custom web components.
+    const inlineTags = new Set([
+      'A', 'ABBR', 'ACRONYM', 'B', 'BDI', 'BDO', 'BIG', 'CITE', 'CODE',
+      'DATA', 'DEL', 'DFN', 'EM', 'FONT', 'I', 'IMG', 'INS', 'KBD',
+      'LABEL', 'MARK', 'Q', 'RP', 'RT', 'RUBY', 'S', 'SAMP', 'SMALL',
+      'SPAN', 'STRIKE', 'STRONG', 'SUB', 'SUP', 'TIME', 'TT', 'U',
+      'VAR', 'WBR',
     ]);
 
     /**
@@ -115,9 +190,10 @@ export class ContentEditableHandler {
           return;
         }
 
-        // For block-level elements, insert a newline BEFORE its content
-        // (but only if we're not at the very start and haven't already inserted one)
-        if (blockTags.has(tag) && offset > 0 && !blockBreakInserted.has(node)) {
+        // Treat any non-inline element as a block boundary (insert newline).
+        // This handles standard block tags AND custom web components (e.g. <shreddit-*>).
+        const isBlock = !inlineTags.has(tag);
+        if (isBlock && offset > 0 && !blockBreakInserted.has(node)) {
           blockBreakInserted.add(node);
           // Only add newline if the previous character isn't already a newline
           const prevEntry = nodeMap[nodeMap.length - 1];
@@ -182,6 +258,13 @@ export class ContentEditableHandler {
 
     const elementRect = element.getBoundingClientRect();
 
+    // Underline color map — used for inline fallback styles in shadow DOM
+    const UNDERLINE_COLORS = {
+      spelling: '#e74c3c',
+      grammar: '#3498db',
+      style: '#f59e0b',
+    };
+
     // ── Render lint underlines ──────────────────────────────────
     lints.forEach((lint, lintIndex) => {
       try {
@@ -198,9 +281,26 @@ export class ContentEditableHandler {
           const underline = document.createElement('div');
           const cat = lint.category || (lint.lintKind === 'Spelling' ? 'spelling' : 'grammar');
           underline.className = 'spelling-tab-underline-' + cat;
-          underline.style.left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
-          underline.style.top = (rect.bottom - elementRect.top + element.scrollTop - 2) + 'px';
-          underline.style.width = rect.width + 'px';
+
+          // Position (always inline)
+          const left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
+          const top = (rect.bottom - elementRect.top + element.scrollTop - 2) + 'px';
+          const width = rect.width + 'px';
+
+          // Inline fallback styles — ensures visibility even without CSS (shadow DOM)
+          const color = UNDERLINE_COLORS[cat] || UNDERLINE_COLORS.spelling;
+          underline.style.cssText = [
+            `position: absolute`,
+            `left: ${left}`,
+            `top: ${top}`,
+            `width: ${width}`,
+            `height: 2px`,
+            `background: linear-gradient(45deg, transparent 25%, ${color} 25%, ${color} 50%, transparent 50%, transparent 75%, ${color} 75%)`,
+            `background-size: 4px 2px`,
+            `pointer-events: auto`,
+            `cursor: pointer`,
+          ].join(';');
+
           underline.dataset.lintIndex = String(lintIndex);
 
           underline.addEventListener('click', (e) => {
@@ -249,9 +349,22 @@ export class ContentEditableHandler {
           for (const rect of rects) {
             const highlight = document.createElement('div');
             highlight.className = 'spelling-tab-underline-sentence';
-            highlight.style.left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
-            highlight.style.top = (rect.bottom - elementRect.top + element.scrollTop - 1) + 'px';
-            highlight.style.width = rect.width + 'px';
+
+            // Inline fallback styles for shadow DOM
+            const left = (rect.left - elementRect.left + element.scrollLeft) + 'px';
+            const top = (rect.bottom - elementRect.top + element.scrollTop - 1) + 'px';
+            const width = rect.width + 'px';
+            highlight.style.cssText = [
+              `position: absolute`,
+              `left: ${left}`,
+              `top: ${top}`,
+              `width: ${width}`,
+              `height: 2.5px`,
+              `background: rgba(139, 92, 246, 0.5)`,
+              `pointer-events: auto`,
+              `cursor: pointer`,
+              `border-radius: 1px`,
+            ].join(';');
 
             highlight.addEventListener('click', (e) => {
               e.preventDefault();
@@ -405,7 +518,14 @@ export class ContentEditableHandler {
     const state = this.tracked.get(element);
     if (!state) return -1;
 
-    const sel = window.getSelection();
+    // Try shadow root selection first (for shadow DOM elements)
+    let sel = window.getSelection();
+    if ((!sel || sel.rangeCount === 0) && element.getRootNode() instanceof ShadowRoot) {
+      try {
+        const shadowSel = element.getRootNode().getSelection?.();
+        if (shadowSel && shadowSel.rangeCount > 0) sel = shadowSel;
+      } catch (_) {}
+    }
     if (!sel || sel.rangeCount === 0) return -1;
 
     const range = sel.getRangeAt(0);
@@ -457,6 +577,23 @@ export class ContentEditableHandler {
       }
     }
     return -1;
+  }
+
+  /**
+   * Get the selection for an element, trying shadow root selection as fallback.
+   */
+  _getSelection(element) {
+    let sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && !sel.isCollapsed) return sel;
+    // For shadow DOM: try the shadow root's getSelection (Chrome non-standard)
+    const root = element.getRootNode();
+    if (root instanceof ShadowRoot && typeof root.getSelection === 'function') {
+      try {
+        const shadowSel = root.getSelection();
+        if (shadowSel && shadowSel.rangeCount > 0) return shadowSel;
+      } catch (_) {}
+    }
+    return sel;
   }
 
   /**
@@ -540,7 +677,7 @@ export class ContentEditableHandler {
         range.setStart(startInfo.node, synthLint.span.start - startInfo.start);
         range.setEnd(endInfo.node, Math.min(synthLint.span.end - endInfo.start, endInfo.node.textContent.length));
 
-        const sel = window.getSelection();
+        const sel = this._getSelection(element) || window.getSelection();
         sel.removeAllRanges();
         sel.addRange(range);
         document.execCommand('insertText', false, fix.replacement);
@@ -588,7 +725,7 @@ export class ContentEditableHandler {
       range.setStart(startInfo.node, startOffset);
       range.setEnd(endInfo.node, endOffset);
 
-      const sel = window.getSelection();
+      const sel = this._getSelection(element) || window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
 
@@ -622,7 +759,7 @@ export class ContentEditableHandler {
     }
 
     element.focus();
-    const sel = window.getSelection();
+    const sel = this._getSelection(element) || window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(element);
     sel.removeAllRanges();

@@ -13,7 +13,7 @@ Powered by [Harper.js](https://github.com/automattic/harper) (Rust grammar engin
 - **Grammar** -- Subject-verb agreement, pronoun case, articles (a/an), homophones (your/you're, their/they're), tense errors, and more. Blue wavy underlines.
 - **Style** -- Wordy phrases, redundant expressions, informal language, and rephrase suggestions. Amber wavy underlines.
 - **Punctuation** -- Run-on sentences, comma splices, missing commas before conjunctions, introductory word commas.
-- **Works Everywhere** -- Supports `<textarea>`, `<input>`, and `contenteditable` elements on any webpage.
+- **Works Everywhere** -- Supports `<textarea>`, `<input>`, and `contenteditable` elements on any webpage, including sites with Shadow DOM / Web Components (e.g., Reddit).
 - **Multiple Fix Methods**:
   - **Click** an underline to see suggestions in a popup
   - Press **Tab** to auto-fix all issues at once
@@ -223,10 +223,11 @@ Click the extension icon in your toolbar to:
 
 ### Chrome Extension Manifest V3
 
-- **Permissions**: `storage` (to persist enable/disable state)
+- **Permissions**: `storage` (to persist enable/disable state), `offscreen` (for AI API access)
 - **Content Security Policy**: `wasm-unsafe-eval` required for loading Harper's WASM binary
-- **Content Scripts**: Injected on all URLs at `document_idle` in all frames
+- **Content Scripts**: Injected on all URLs (except Google Docs/Sheets/Slides) at `document_idle` in all frames
 - **Service Worker**: ESM module type for dynamic imports
+- **Web Accessible Resources**: `content/styles.css` exposed for Shadow DOM CSS injection
 
 ### Underline Rendering
 
@@ -235,6 +236,9 @@ Uses a mirror-div overlay technique. A transparent `<div>` is positioned exactly
 
 **For `contenteditable`:**
 Uses the Range API with `getClientRects()` to calculate exact positions of error text. Absolutely-positioned `<div>` underlines are placed below each error span. The system handles multi-line wrapping and scroll offsets.
+
+**Shadow DOM support:**
+For sites using Web Components with Shadow DOM (e.g., Reddit's `<shreddit-*>` Lit components), the extension injects CSS via `<link>` tags into shadow roots and uses inline fallback styles on underline elements. Focus detection uses `Event.composedPath()` to pierce shadow boundaries, and selection-related features use shadow root `getSelection()` where available.
 
 ### Custom Rules Format
 
@@ -262,20 +266,22 @@ The `COMMON_MISSPELLINGS` export in `custom-rules.js` maps ~250 frequently missp
 
 | File | Lines | Purpose |
 |---|---|---|
-| `src/background/service-worker.js` | ~220 | WASM initialization, Harper linting, suggestion post-processing, message handling |
+| `src/background/service-worker.js` | ~300 | WASM initialization, Harper linting, suggestion post-processing, AI relay to offscreen |
 | `src/background/custom-rules.js` | ~1070 | 250+ misspelling corrections, 50+ grammar/style/punctuation rules, run-on detection |
-| `src/content/content-script.js` | ~195 | Main orchestrator: wires up all content modules, Tab key handler, fix routing |
+| `src/content/content-script.js` | ~550 | Main orchestrator: Tab key, AI toolbar, Shadow DOM support, fix routing |
 | `src/content/linter-client.js` | ~35 | Message bridge to service worker with LRU cache (50 entries) |
-| `src/content/element-detector.js` | ~45 | Focus-based element detection (no DOM scanning on page load) |
+| `src/content/element-detector.js` | ~70 | Focus-based element detection with `composedPath()` for Shadow DOM |
 | `src/content/overlay-manager.js` | ~180 | Mirror-div overlay system for textarea/input underlines |
-| `src/content/contenteditable-handler.js` | ~310 | Range API underlines, targeted DOM range fix application |
-| `src/content/suggestion-popup.js` | ~100 | Click-on-underline popup with category labels and fix buttons |
-| `src/content/fix-pill.js` | varies | "Tab to fix" floating hint near cursor |
+| `src/content/contenteditable-handler.js` | ~770 | Range API underlines, Shadow DOM CSS injection, AI sentence highlights |
+| `src/content/suggestion-popup.js` | ~210 | Click-on-underline popup with fix buttons + AI rewrite diff view |
+| `src/content/fix-pill.js` | ~80 | "Tab to fix" floating hint near cursor |
+| `src/content/tab-fix-all.js` | ~60 | Tab key fix-all handler with contenteditable support |
 | `src/content/styles.css` | ~220 | All visual styles: underlines, popups, hints (3-color system) |
-| `src/popup/popup.html` | ~25 | Popup markup: toggle, issue list, fix-all button |
+| `src/offscreen/offscreen.js` | ~165 | Chrome Prompt API handler for AI improve/rephrase |
+| `src/popup/popup.html` | ~30 | Popup markup: toggle, issue list, fix-all button |
 | `src/popup/popup.js` | ~110 | Popup logic: loads lints, renders issue cards with fix buttons |
 | `src/popup/popup.css` | ~210 | Popup styling |
-| `esbuild.config.mjs` | ~65 | Build config: 3 bundles + asset copying |
+| `esbuild.config.mjs` | ~80 | Build config: 4 bundles + asset copying |
 
 ---
 
@@ -313,6 +319,17 @@ export const COMMON_MISSPELLINGS = {
 ```
 
 Keys must be lowercase. The correction is case-matched to the original automatically.
+
+---
+
+## Known Limitations
+
+- **Google Docs / Sheets / Slides** -- These apps render text on a `<canvas>` element rather than in the DOM, so the extension cannot detect or underline errors there. The extension automatically disables itself on these sites.
+- **Shadow DOM CSS isolation** -- On sites using Web Components with Shadow DOM (e.g., Reddit), the extension uses inline styles as a fallback since external CSS cannot penetrate shadow boundaries. Underlines work but may look slightly different from the main-document styling.
+- **AI features require Chrome 138+** -- The built-in Gemini Nano AI requires a supported Chrome version, macOS 13+ / Windows 10+ / Linux, 22GB free storage, and a GPU (4GB+ VRAM) or CPU (16GB RAM, 4+ cores). Without these, all Harper-based features still work normally.
+- **`contenteditable="plaintext-only"`** -- Supported but some advanced editors that heavily customize selection/input behavior may interfere with fix application.
+- **iframes** -- The extension runs in all frames (`"all_frames": true`), but cross-origin iframes may have limited functionality depending on the site's CSP.
+- **Very large text fields** -- Harper runs in the service worker. Extremely long documents (10,000+ words) may experience slight lag on the first lint pass.
 
 ---
 

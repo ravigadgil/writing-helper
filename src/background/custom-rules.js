@@ -1393,8 +1393,10 @@ export function runCustomRules(text, existingLints = []) {
 
   // ── Sentence-start capitalization ──────────────────────────────────
   // Harper misses the very first word of text if it starts lowercase.
-  // Detect: start of text or after .!? followed by a lowercase letter.
-  const capPattern = /(?:^|[.!?]\s+)([a-z])/g;
+  // Detect: start of text (possibly after leading whitespace/newlines from
+  // contenteditable DOM extraction), after newlines (paragraph breaks),
+  // or after .!? followed by a lowercase letter.
+  const capPattern = /(?:^\s*|\n\s*|[.!?]\s+)([a-z])/g;
   let capMatch;
   while ((capMatch = capPattern.exec(text)) !== null) {
     const charStart = capMatch.index + capMatch[0].length - 1;

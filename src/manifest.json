@@ -11,6 +11,11 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "https://docs.google.com/*",
+        "https://sheets.google.com/*",
+        "https://slides.google.com/*"
+      ],
       "js": ["content/content-script.js"],
       "css": ["content/styles.css"],
       "run_at": "document_idle",
@@ -32,5 +37,11 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["content/styles.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 {
-  "name": "spelling-tab",
-  "version": "1.0.0",
-  "description": "Offline grammar and spell checker Chrome extension powered by Harper.js",
+  "name": "writing-helper",
+  "version": "1.0.1",
+  "description": "Privacy-first offline grammar and spell checker Chrome extension powered by Harper.js and Chrome's built-in Gemini Nano AI",
   "scripts": {
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch"

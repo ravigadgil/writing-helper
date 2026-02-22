@@ -1,3 +1,5 @@
+import { CE_SELECTOR } from './element-detector.js';
+
 export class TabFixAll {
   constructor(overlayManager, ceHandler) {
     this.overlayManager = overlayManager;
@@ -47,7 +49,7 @@ export class TabFixAll {
 
     // Strategy 2: Check if active element is inside a contenteditable
     // (handles cases where activeElement is a child node, not the CE root)
-    const ceAncestor = element.closest('[contenteditable="true"], [contenteditable=""]');
+    const ceAncestor = element.closest(CE_SELECTOR);
     if (ceAncestor && this.ceHandler.tracked.has(ceAncestor)) {
       return ceAncestor;
     }
