@@ -11,7 +11,7 @@ async function checkPromptApi() {
   if (_promptApiAvailable !== null) return _promptApiAvailable;
 
   if (typeof LanguageModel === 'undefined') {
-    console.log('[Spelling Tab AI] LanguageModel not available in this environment');
+    console.log('[Writing Helper AI] LanguageModel not available in this environment');
     _promptApiAvailable = false;
     return false;
   }
@@ -19,9 +19,9 @@ async function checkPromptApi() {
   try {
     const avail = await LanguageModel.availability();
     _promptApiAvailable = (avail === 'available' || avail === 'downloadable' || avail === 'downloading');
-    console.log('[Spelling Tab AI] Prompt API availability:', avail);
+    console.log('[Writing Helper AI] Prompt API availability:', avail);
   } catch (e) {
-    console.log('[Spelling Tab AI] Prompt API check failed:', e.message);
+    console.log('[Writing Helper AI] Prompt API check failed:', e.message);
     _promptApiAvailable = false;
   }
 
@@ -65,7 +65,7 @@ Rules:
       return { available: true, improved: cleaned };
     }
   } catch (e) {
-    console.error('[Spelling Tab AI] Improve failed:', e);
+    console.error('[Writing Helper AI] Improve failed:', e);
   }
 
   return { available: false, improved: null };
@@ -133,7 +133,7 @@ Rules:
       return { available: true, rephrased: cleaned };
     }
   } catch (e) {
-    console.error('[Spelling Tab AI] Rephrase failed:', e);
+    console.error('[Writing Helper AI] Rephrase failed:', e);
   }
 
   return { available: false, rephrased: null };
@@ -161,4 +161,4 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-console.log('[Spelling Tab AI] Offscreen document loaded');
+console.log('[Writing Helper AI] Offscreen document loaded');

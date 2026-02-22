@@ -24,7 +24,7 @@ export class LinterClient {
 
       return lints;
     } catch (err) {
-      console.error('Spelling Tab: lint request failed', err);
+      console.error('Writing Helper: lint request failed', err);
       return [];
     }
   }

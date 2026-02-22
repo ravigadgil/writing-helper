@@ -27,7 +27,7 @@ async function sendToOffscreen(message) {
     await ensureOffscreen();
     return await chrome.runtime.sendMessage({ ...message, target: 'offscreen' });
   } catch (err) {
-    console.warn('Spelling Tab: offscreen message failed', err);
+    console.warn('Writing Helper: offscreen message failed', err);
     return { available: false };
   }
 }
@@ -69,17 +69,25 @@ function fixHarperSuggestions(lints, text) {
     if (!problem.includes(' ')) {
       lint.suggestions = lint.suggestions.filter(s => {
         const sugText = s.text;
-        // If suggestion has a space, check if both parts are real words (3+ chars)
+        // If suggestion has a space, check if it's a plausible word split
         if (sugText.includes(' ')) {
           const parts = sugText.split(/\s+/);
-          // Keep if all parts are 3+ chars (likely a real compound split like "some thing")
-          // Drop if any part is <= 2 chars (likely nonsense like "writ ting")
-          const allPartsReasonable = parts.every(p => p.length >= 3);
-          if (!allPartsReasonable) return false;
+          // Allow splits where parts are common short words (prepositions, articles, etc.)
+          const commonShortWords = new Set([
+            'a', 'an', 'am', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if',
+            'in', 'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to',
+            'up', 'us', 'we', 'id', 'ok',
+          ]);
+          const allPartsValid = parts.every(p => p.length >= 3 || commonShortWords.has(p.toLowerCase()));
+          if (!allPartsValid) return false;
           // Also drop if the combined parts look like a misspelling variant
           // (the original word minus/plus a letter → not a real split)
-          const combined = parts.join('');
-          if (Math.abs(combined.length - problem.length) <= 1) return false;
+          // But only if no part is a common short word (real splits like "testof" → "test of" are valid)
+          const hasCommonWord = parts.some(p => commonShortWords.has(p.toLowerCase()));
+          if (!hasCommonWord) {
+            const combined = parts.join('');
+            if (Math.abs(combined.length - problem.length) <= 1) return false;
+          }
         }
         return true;
       });
@@ -223,7 +231,7 @@ async function handleMessage(message, sender) {
 
         return { lints: allLints };
       } catch (err) {
-        console.error('Spelling Tab lint error:', err);
+        console.error('Writing Helper lint error:', err);
         return { lints: [] };
       }
     }

@@ -1,4 +1,4 @@
-# Writing Helper (Spelling Tab)
+# Writing Helper
 
 A privacy-first, offline grammar and spell checker Chrome extension. Works like Grammarly but runs **entirely locally** on your machine using WebAssembly and Chrome's built-in AI. No data ever leaves your browser.
 

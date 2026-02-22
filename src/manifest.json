@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Spelling Tab",
+  "name": "Writing Helper",
   "version": "1.0.1",
   "description": "Offline grammar and spell checker powered by Harper.js",
   "permissions": ["storage", "offscreen"],

@@ -395,17 +395,66 @@ export class ContentEditableHandler {
     if (!sel || sel.rangeCount === 0) return -1;
 
     const range = sel.getRangeAt(0);
-    const cursorNode = range.startContainer;
-    const cursorNodeOffset = range.startOffset;
+    let cursorNode = range.startContainer;
+    let cursorNodeOffset = range.startOffset;
+
+    // If the cursor is at an element node (not a text node), resolve to the
+    // actual text node child. This happens in Gmail when cursor sits at a <div>.
+    if (cursorNode.nodeType === Node.ELEMENT_NODE) {
+      const children = cursorNode.childNodes;
+      if (cursorNodeOffset < children.length) {
+        const child = children[cursorNodeOffset];
+        if (child.nodeType === Node.TEXT_NODE) {
+          cursorNode = child;
+          cursorNodeOffset = 0;
+        } else {
+          // Cursor is before a block element — find the closest text node before it
+          for (let k = cursorNodeOffset - 1; k >= 0; k--) {
+            const prev = children[k];
+            if (prev.nodeType === Node.TEXT_NODE) {
+              cursorNode = prev;
+              cursorNodeOffset = prev.textContent.length;
+              break;
+            }
+            // Look for text node inside the previous element
+            const lastText = this._lastTextNode(prev);
+            if (lastText) {
+              cursorNode = lastText;
+              cursorNodeOffset = lastText.textContent.length;
+              break;
+            }
+          }
+        }
+      } else if (children.length > 0) {
+        // Cursor is at the end — use last text node
+        const lastText = this._lastTextNode(cursorNode);
+        if (lastText) {
+          cursorNode = lastText;
+          cursorNodeOffset = lastText.textContent.length;
+        }
+      }
+    }
 
     // Find this node in our nodeMap
     for (const entry of state.nodeMap) {
       if (entry.synthetic) continue;
       if (entry.node === cursorNode) {
-        return entry.start + cursorNodeOffset;
+        return entry.start + Math.min(cursorNodeOffset, entry.node.textContent.length);
       }
     }
     return -1;
+  }
+
+  /**
+   * Find the last text node descendant of a node (depth-first, right-to-left).
+   */
+  _lastTextNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node;
+    for (let i = node.childNodes.length - 1; i >= 0; i--) {
+      const result = this._lastTextNode(node.childNodes[i]);
+      if (result) return result;
+    }
+    return null;
   }
 
   applyAllFixes(element) {
@@ -429,13 +478,13 @@ export class ContentEditableHandler {
     });
     if (fixable.length === 0) return false;
 
-    // Collect the original problem text and replacement for each fix.
-    // We'll apply them one at a time, re-finding each in the live text,
-    // so that DOM structure (paragraphs, line breaks) is preserved.
+    // Collect the original problem text, replacement, and original span offset.
+    // Sort in reverse order so that applying fixes from the end doesn't shift earlier offsets.
     const fixes = fixable
       .map(l => ({
         problem: state.text.substring(l.span.start, l.span.end),
         replacement: l.suggestions[0].text,
+        originalStart: l.span.start,
         span: { ...l.span },
       }))
       .sort((a, b) => b.span.start - a.span.start); // reverse order
@@ -446,8 +495,20 @@ export class ContentEditableHandler {
       state.text = text;
       state.nodeMap = nodeMap;
 
-      // Find the problem text in the current text
-      const idx = text.indexOf(fix.problem);
+      // Search for the problem text near where we expect it (within the paragraph).
+      // Use the original span start as a hint to find the right occurrence,
+      // searching outward from that position to handle minor shifts from prior fixes.
+      let idx = -1;
+      const searchStart = Math.max(0, fix.originalStart - 50);
+      const searchEnd = Math.min(text.length, fix.originalStart + fix.problem.length + 50);
+      const nearbyText = text.substring(searchStart, searchEnd);
+      const localIdx = nearbyText.indexOf(fix.problem);
+      if (localIdx !== -1) {
+        idx = searchStart + localIdx;
+      } else {
+        // Fallback: search entire text (may match wrong occurrence)
+        idx = text.indexOf(fix.problem);
+      }
       if (idx === -1) continue;
 
       const synthLint = { span: { start: idx, end: idx + fix.problem.length } };
@@ -524,7 +585,7 @@ export class ContentEditableHandler {
       state.nodeMap = newMap;
     } catch (err) {
       // Fallback: if ranged fix fails, use the old whole-content replacement
-      console.warn('Spelling Tab: ranged fix failed, falling back', err);
+      console.warn('Writing Helper: ranged fix failed, falling back', err);
       this._replaceContentFallback(element, state, lint, suggestion);
     }
   }

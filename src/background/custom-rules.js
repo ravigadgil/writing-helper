@@ -331,6 +331,7 @@ export const COMMON_MISSPELLINGS = {
   'componenet': 'component',
   'repsone': 'response',
   'repsonse': 'response',
+  'weel': 'well',
 };
 
 // Helpers
