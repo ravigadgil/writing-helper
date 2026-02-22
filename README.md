@@ -149,17 +149,22 @@ Content Script → Service Worker → Offscreen Document (AI APIs) → back
 
 ## Installation
 
-### Prerequisites
+### Quick Install (no build needed)
 
-- [Node.js](https://nodejs.org/) v18 or later
-- [npm](https://www.npmjs.com/) (comes with Node.js)
-- Google Chrome or Chromium-based browser
+1. Download `writing-helper.zip` from the [latest release](https://github.com/ravigadgil/writing-helper/releases/latest)
+2. Extract the zip folder
+3. Open Chrome and go to `chrome://extensions/`
+4. Enable **Developer mode** (toggle in the top-right corner)
+5. Click **Load unpacked** and select the extracted folder
+6. The extension icon appears in your toolbar — you're ready to go!
 
-### Build from Source
+### Build from Source (for developers)
+
+If you want to modify the code or contribute:
 
 ```bash
 # 1. Clone the repository
-git clone git@github.com:ravigadgil/writing-helper.git
+git clone https://github.com/ravigadgil/writing-helper.git
 cd writing-helper
 
 # 2. Install dependencies
@@ -169,20 +174,7 @@ npm install
 npm run build
 ```
 
-This compiles the source into the `dist/` folder:
-- Service worker bundled as ESM
-- Content script bundled as IIFE
-- Popup script bundled as IIFE
-- WASM binary copied from `harper.js`
-- Static assets (HTML, CSS, icons) copied
-
-### Load in Chrome
-
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in the top-right corner)
-3. Click **Load unpacked**
-4. Select the `dist/` folder from this project
-5. The extension icon appears in your toolbar -- you're ready to go!
+This compiles the source into the `dist/` folder. Then load `dist/` as an unpacked extension in Chrome (same steps 3-6 above).
 
 ### Development
 
