@@ -13,13 +13,16 @@ async function ensureOffscreen() {
   const existing = await chrome.offscreen.hasDocument();
   if (existing) return;
   if (offscreenCreating) { await offscreenCreating; return; }
-  offscreenCreating = chrome.offscreen.createDocument({
-    url: 'offscreen/offscreen.html',
-    reasons: ['DOM_PARSER'],
-    justification: 'Chrome Prompt API requires DOM context for AI text improvement',
-  });
-  await offscreenCreating;
-  offscreenCreating = null;
+  try {
+    offscreenCreating = chrome.offscreen.createDocument({
+      url: 'offscreen/offscreen.html',
+      reasons: ['DOM_PARSER'],
+      justification: 'Chrome Prompt API requires DOM context for AI text improvement',
+    });
+    await offscreenCreating;
+  } finally {
+    offscreenCreating = null;
+  }
 }
 
 async function sendToOffscreen(message) {
@@ -118,14 +121,25 @@ function fixHarperSuggestions(lints, text) {
 }
 
 /**
- * Fix common doubled-letter misspellings:
- * "writting" → "writing", "comming" → "coming", "runing" → "running"
+ * Fix common doubled-letter misspellings by trying single-consonant
+ * de-duplication one pair at a time. Only returns a candidate if it's
+ * in the COMMON_MISSPELLINGS table — avoids mangling real words like
+ * "butter", "happy", "tapping".
  */
 function fixDoubledLetters(word) {
-  // Try removing doubled consonants
-  const deduped = word.replace(/([bcdfghjklmnpqrstvwxyz])\1/g, '$1');
-  // If the word changed and is a common pattern, return it
-  if (deduped !== word) return deduped;
+  // First check if the whole word (with all doubles removed) is known
+  const knownFix = COMMON_MISSPELLINGS[word];
+  if (knownFix) return knownFix;
+
+  // Try removing one doubled consonant at a time
+  const doublePattern = /([bcdfghjklmnpqrstvwxyz])\1/g;
+  let match;
+  while ((match = doublePattern.exec(word)) !== null) {
+    const candidate = word.substring(0, match.index) + match[1] + word.substring(match.index + 2);
+    const knownCandidate = COMMON_MISSPELLINGS[candidate];
+    if (knownCandidate) return knownCandidate;
+  }
+
   return null;
 }
 
@@ -254,6 +268,12 @@ async function handleMessage(message, sender) {
     case 'set-enabled':
       isEnabled = message.enabled;
       chrome.storage.local.set({ enabled: isEnabled });
+      // Broadcast to all content scripts
+      chrome.tabs.query({}, (tabs) => {
+        for (const tab of tabs) {
+          chrome.tabs.sendMessage(tab.id, { type: 'enabled-changed', enabled: isEnabled }).catch(() => {});
+        }
+      });
       return { enabled: isEnabled };
     default:
       return {};
@@ -263,6 +283,14 @@ async function handleMessage(message, sender) {
 // Clean up when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabLints.delete(tabId);
+});
+
+// Clean up stale lints on navigation (SPA pages don't close tabs)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.status === 'loading') {
+    tabLints.delete(tabId);
+    chrome.action.setBadgeText({ text: '', tabId });
+  }
 });
 
 // Restore saved state on startup

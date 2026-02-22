@@ -3,6 +3,7 @@ export class ElementDetector {
     this.overlayManager = overlayManager;
     this.ceHandler = ceHandler;
     this.trackedElements = new WeakSet();
+    this.isEnabled = () => true; // overridable check
   }
 
   start() {
@@ -27,6 +28,7 @@ export class ElementDetector {
     document.addEventListener('focusin', (e) => {
       const el = e.target;
       if (!el) return;
+      if (!this.isEnabled()) return;
 
       if (el.matches('textarea, input[type="text"], input:not([type])')) {
         if (!this.trackedElements.has(el)) this.track(el);

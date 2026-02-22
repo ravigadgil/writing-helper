@@ -12,10 +12,24 @@ const ceHandler = new ContentEditableHandler(linterClient, suggestionPopup);
 const tabHint = new TabHint();
 const detector = new ElementDetector(overlayManager, ceHandler);
 
+// ── Extension enabled state ──────────────────────────────────────────
+let extensionEnabled = true;
+
+// Query initial state
+chrome.runtime.sendMessage({ type: 'get-enabled' }).then(r => {
+  if (r && r.enabled === false) extensionEnabled = false;
+}).catch(() => {});
+
+// Listen for toggle changes from popup
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'enabled-changed') {
+    extensionEnabled = message.enabled;
+    if (!extensionEnabled) tabHint.hide();
+  }
+});
+
 // Track which elements the user has actually typed in.
 const userHasTypedIn = new WeakSet();
-// Track which elements currently have fixable lints
-const hasFixableLints = new WeakSet();
 
 document.addEventListener('input', (e) => {
   const el = e.target;
@@ -42,11 +56,6 @@ suggestionPopup.onApply = (element, lint, suggestion) => {
 // When lints change in overlay (textarea/input)
 overlayManager.onLintsChanged = (element, lints) => {
   const fixable = lints.filter(l => l.suggestions.length > 0);
-  if (fixable.length > 0) {
-    hasFixableLints.add(element);
-  } else {
-    hasFixableLints.delete(element);
-  }
 
   if (document.activeElement !== element) return;
   if (!userHasTypedIn.has(element)) return;
@@ -61,11 +70,6 @@ overlayManager.onLintsChanged = (element, lints) => {
 // When lints change in contenteditable
 ceHandler.onLintsChanged = (element, lints) => {
   const fixable = lints.filter(l => l.suggestions.length > 0);
-  if (fixable.length > 0) {
-    hasFixableLints.add(element);
-  } else {
-    hasFixableLints.delete(element);
-  }
 
   const active = document.activeElement;
   const isFocused = active === element || element.contains(active);
@@ -174,7 +178,8 @@ function applyFixByIndex(lintIndex, suggestionIndex = 0) {
   handler.applySingleFix(target.element, lint, suggestion);
 }
 
-// Tab key handler — intercept in capture phase before browser focus navigation
+// Tab key handler — intercept in capture phase before browser focus navigation.
+// Only prevent default if applyFixAll actually fixes something in the current paragraph.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab') return;
 
@@ -191,9 +196,18 @@ document.addEventListener('keydown', (e) => {
   if (!state || state.lints.length === 0) return;
   if (!state.lints.some(l => l.suggestions.length > 0)) return;
 
-  e.preventDefault();
-  e.stopPropagation();
-  applyFixAll();
+  // Try to apply fixes — only consume Tab if something was actually fixed
+  tabHint.hide();
+  let fixed;
+  if (target.type === 'overlay') {
+    fixed = overlayManager.applyAllFixes(target.element);
+  } else {
+    fixed = ceHandler.applyAllFixes(target.element);
+  }
+  if (fixed) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
 }, true);
 
 // ── Sentence-level AI suggestion (Grammarly-style) ───────────────────────
@@ -480,4 +494,5 @@ document.addEventListener('keydown', (e) => {
   });
 });
 
+detector.isEnabled = () => extensionEnabled;
 detector.start();

@@ -218,11 +218,25 @@ export class OverlayManager {
    * Only checks sentences not already cached or in-flight.
    */
   async _checkSentencesWithAI(sentences, element) {
+    // Debounce AI checks — wait 2s after last call to avoid flooding the Prompt API
+    clearTimeout(this._aiDebounceTimer);
+    this._aiDebounceTimer = setTimeout(() => {
+      this._doCheckSentencesWithAI(sentences, element);
+    }, 2000);
+  }
+
+  async _doCheckSentencesWithAI(sentences, element) {
     for (const sentence of sentences) {
       if (this._aiSentenceCache.has(sentence.text)) continue;
       if (this._aiSentenceChecking.has(sentence.text)) continue;
 
       this._aiSentenceChecking.add(sentence.text);
+
+      // Cap cache size to prevent memory leak
+      if (this._aiSentenceCache.size > 200) {
+        const firstKey = this._aiSentenceCache.keys().next().value;
+        this._aiSentenceCache.delete(firstKey);
+      }
 
       chrome.runtime.sendMessage({ type: 'ai-improve', text: sentence.text })
         .then(result => {
