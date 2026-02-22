@@ -1391,6 +1391,37 @@ export function runCustomRules(text, existingLints = []) {
     }
   }
 
+  // ── Sentence-start capitalization ──────────────────────────────────
+  // Harper misses the very first word of text if it starts lowercase.
+  // Detect: start of text or after .!? followed by a lowercase letter.
+  const capPattern = /(?:^|[.!?]\s+)([a-z])/g;
+  let capMatch;
+  while ((capMatch = capPattern.exec(text)) !== null) {
+    const charStart = capMatch.index + capMatch[0].length - 1;
+    const charEnd = charStart + 1;
+    const lowerChar = capMatch[1];
+
+    // Skip if already flagged by Harper or another rule
+    if (occupied.some(([os, oe]) => charStart < oe && charEnd > os)) continue;
+
+    // Skip single-letter words that aren't real sentence starts (code, variables)
+    // But always flag common pronouns and articles
+    const wordAfter = text.slice(charStart).match(/^[a-z]+/)?.[0];
+    if (!wordAfter) continue;
+
+    results.push({
+      span: { start: charStart, end: charStart + wordAfter.length },
+      message: 'This sentence does not start with a capital letter.',
+      lintKind: 'Capitalization',
+      lintKindPretty: 'Capitalization',
+      category: 'grammar',
+      problemText: wordAfter,
+      suggestions: [{ text: wordAfter.charAt(0).toUpperCase() + wordAfter.slice(1), kind: 'ReplaceWith' }],
+    });
+
+    occupied.push([charStart, charEnd]);
+  }
+
   // Run-on clause detection (needs smarter logic than simple regex)
   const runOnLints = detectRunOnClauses(text, occupied);
   results.push(...runOnLints);
