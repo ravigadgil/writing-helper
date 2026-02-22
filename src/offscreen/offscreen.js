@@ -34,6 +34,7 @@ async function handleImprove(text) {
 
   try {
     const session = await LanguageModel.create({
+      expectedOutputLanguages: ['en'],
       initialPrompts: [{
         role: 'system',
         content: `You are a proofreading and writing improvement assistant.
@@ -118,6 +119,7 @@ Rules:
 
   try {
     const session = await LanguageModel.create({
+      expectedOutputLanguages: ['en'],
       initialPrompts: [{ role: 'system', content: systemPrompt }],
     });
 
