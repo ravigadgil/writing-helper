@@ -122,21 +122,23 @@ export class TabHint {
     const hintWidth = 70;
     const hintHeight = 20;
 
-    // Position right after the caret, same line
-    let left = pos.left + 4;
-    let top = pos.top;
+    // Position below the caret, aligned to caret left edge
+    let left = pos.left;
+    let top = pos.bottom + 4;
 
-    // If it would go off right side, put it below the caret instead
-    if (left + hintWidth > window.innerWidth - 8) {
-      left = pos.left - hintWidth - 4;
+    // If it would go off the bottom, put it above the caret instead
+    if (top + hintHeight > window.innerHeight - 4) {
+      top = pos.top - hintHeight - 4;
     }
 
-    // If still off-screen, just clamp
+    // If it would go off right side, shift left
+    if (left + hintWidth > window.innerWidth - 8) {
+      left = window.innerWidth - hintWidth - 8;
+    }
+
+    // Clamp to screen
     if (left < 4) left = 4;
     if (top < 4) top = 4;
-    if (top + hintHeight > window.innerHeight - 4) {
-      top = window.innerHeight - hintHeight - 4;
-    }
 
     this.hintEl.style.setProperty('left', left + 'px', 'important');
     this.hintEl.style.setProperty('top', top + 'px', 'important');

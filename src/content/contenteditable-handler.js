@@ -580,6 +580,30 @@ export class ContentEditableHandler {
   }
 
   /**
+   * Restore the cursor to a given text offset in the element.
+   * Rebuilds the text map and places the cursor at the right text node.
+   */
+  _restoreCursorOffset(element, targetOffset) {
+    try {
+      const { nodeMap } = this.buildTextMap(element);
+      const info = this.findNodeAtOffset(nodeMap, targetOffset);
+      if (!info) return;
+
+      const localOffset = Math.min(targetOffset - info.start, info.node.textContent.length);
+      element.focus();
+      const range = document.createRange();
+      range.setStart(info.node, localOffset);
+      range.collapse(true);
+
+      const sel = this._getSelection(element) || window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) {
+      // If restore fails, cursor stays wherever it landed — not critical
+    }
+  }
+
+  /**
    * Get the selection for an element, trying shadow root selection as fallback.
    */
   _getSelection(element) {
@@ -633,6 +657,10 @@ export class ContentEditableHandler {
     });
     if (fixable.length === 0) return false;
 
+    // Save the cursor offset so we can restore it after fixing.
+    // As fixes are applied, we adjust this offset to account for text length changes.
+    let savedCursorOffset = cursorOffset >= 0 ? cursorOffset : -1;
+
     // Collect the original problem text, replacement, and original span offset.
     // Sort in reverse order so that applying fixes from the end doesn't shift earlier offsets.
     const fixes = fixable
@@ -682,10 +710,21 @@ export class ContentEditableHandler {
         sel.addRange(range);
         document.execCommand('insertText', false, fix.replacement);
 
+        // Adjust saved cursor offset for this fix's text length change
+        if (savedCursorOffset >= 0 && idx < savedCursorOffset) {
+          const delta = fix.replacement.length - fix.problem.length;
+          savedCursorOffset += delta;
+        }
+
         this.ensureContainer(element);
       } catch (err) {
         // Skip this fix if it fails
       }
+    }
+
+    // Restore cursor to its original position (adjusted for fix shifts)
+    if (savedCursorOffset >= 0) {
+      this._restoreCursorOffset(element, savedCursorOffset);
     }
 
     this.linterClient.clearCache();
