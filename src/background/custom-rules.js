@@ -15,6 +15,25 @@
  * Keys MUST be lowercase.
  */
 export const COMMON_MISSPELLINGS = {
+  // Doubled-letter typos that Harper often gets wrong
+  'aaple': 'apple',
+  'aple': 'apple',
+  'aplle': 'apple',
+  'appple': 'apple',
+  'nned': 'need',
+  'neeed': 'need',
+  'teh': 'the',
+  'hte': 'the',
+  'taht': 'that',
+  'waht': 'what',
+  'wrok': 'work',
+  'worls': 'world',
+  'peple': 'people',
+  'poeple': 'people',
+  'becuase': 'because',
+  'becasue': 'because',
+  'beacuse': 'because',
+
   // Doubled / missing letter errors
   'writting': 'writing',
   'writeing': 'writing',
@@ -576,8 +595,8 @@ const RULES = [
     category: 'grammar',
   },
   {
-    // "i" as a standalone word (pronoun) → "I"
-    regex: /(?:^|[.!?]\s+)(i)\s/gm,
+    // "i" as a standalone word (pronoun) → "I" — anywhere in text
+    regex: /(?:^|[\s,;:!?.'"()\-])(i)(?=[\s,;:!?.'"()\-]|$)/gm,
     match: 1,
     message: `The pronoun "I" should always be capitalized.`,
     suggest: () => ['I'],

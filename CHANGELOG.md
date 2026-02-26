@@ -2,6 +2,15 @@
 
 All notable changes to Writing Helper are documented here.
 
+## [1.0.3] - 2026-02-26
+
+### Fixed
+- **Tab fix applying to wrong text** -- when fixing short words like "i" → "I", the fix could match inside other words (e.g., the "i" in "testing" → "testIng"). Now finds the occurrence closest to the original position instead of the first match.
+- **Standalone "i" not capitalized** mid-sentence -- the capitalize-I rule only triggered at sentence starts. Now detects uncapitalized "I" anywhere in text (after spaces, commas, etc.).
+
+### Added
+- **17 new misspelling corrections** -- common typos like `aaple→apple`, `nned→need`, `teh→the`, `becuase→because`, and more that Harper.js was correcting incorrectly.
+
 ## [1.0.2] - 2026-02-26
 
 ### Fixed

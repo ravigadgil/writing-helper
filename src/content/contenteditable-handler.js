@@ -678,19 +678,46 @@ export class ContentEditableHandler {
       state.text = text;
       state.nodeMap = nodeMap;
 
-      // Search for the problem text near where we expect it (within the paragraph).
-      // Use the original span start as a hint to find the right occurrence,
-      // searching outward from that position to handle minor shifts from prior fixes.
+      // Search for the problem text near where we expect it.
+      // Find the occurrence CLOSEST to fix.originalStart to avoid matching
+      // the same substring inside another word (e.g., "i" inside "testing").
       let idx = -1;
       const searchStart = Math.max(0, fix.originalStart - 50);
       const searchEnd = Math.min(text.length, fix.originalStart + fix.problem.length + 50);
       const nearbyText = text.substring(searchStart, searchEnd);
-      const localIdx = nearbyText.indexOf(fix.problem);
-      if (localIdx !== -1) {
-        idx = searchStart + localIdx;
+
+      // Collect ALL occurrences in the window, pick the closest to originalStart
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      let searchPos = 0;
+      while (searchPos < nearbyText.length) {
+        const localIdx = nearbyText.indexOf(fix.problem, searchPos);
+        if (localIdx === -1) break;
+        const absIdx = searchStart + localIdx;
+        const dist = Math.abs(absIdx - fix.originalStart);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = absIdx;
+        }
+        searchPos = localIdx + 1;
+      }
+
+      if (bestIdx !== -1) {
+        idx = bestIdx;
       } else {
-        // Fallback: search entire text (may match wrong occurrence)
-        idx = text.indexOf(fix.problem);
+        // Fallback: search entire text for closest occurrence
+        searchPos = 0;
+        while (searchPos < text.length) {
+          const globalIdx = text.indexOf(fix.problem, searchPos);
+          if (globalIdx === -1) break;
+          const dist = Math.abs(globalIdx - fix.originalStart);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = globalIdx;
+          }
+          searchPos = globalIdx + 1;
+        }
+        idx = bestIdx;
       }
       if (idx === -1) continue;
 
