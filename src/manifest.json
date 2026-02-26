@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Writing Helper",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Offline grammar and spell checker powered by Harper.js",
   "permissions": ["storage", "offscreen"],
   "background": {

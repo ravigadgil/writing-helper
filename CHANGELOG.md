@@ -2,7 +2,13 @@
 
 All notable changes to Writing Helper are documented here.
 
-## [1.0.1] - 2026-02-26
+## [1.0.2] - 2026-02-26
+
+### Fixed
+- **Cursor jumping to first fix** after pressing Tab to fix all -- cursor position is now saved, adjusted for text shifts, and restored after all fixes are applied.
+- **"Tab to fix" hint blocking view** -- hint now appears below the cursor instead of to the right.
+
+## [1.0.1] - 2026-02-22
 
 ### Added
 - **Shadow DOM / Web Components support** -- Extension now works on sites using Shadow DOM (e.g., Reddit). CSS is injected into shadow roots via `<link>` tags with inline fallback styles. Focus detection uses `composedPath()` to pierce shadow boundaries.
@@ -14,8 +20,6 @@ All notable changes to Writing Helper are documented here.
 - **Text extraction concatenating words** on sites with custom web components (e.g., Reddit's `<shreddit-*>` Lit components). Switched from `blockTags` allowlist to `inlineTags` set -- any non-inline element is now treated as a block boundary.
 - **AI toolbar not appearing** in Shadow DOM -- added shadow-aware `getSelection()` and direct `mouseup` listeners on shadow DOM contenteditable elements.
 - **Capitalization detection** now handles leading whitespace and newlines from DOM extraction.
-- **Cursor jumping to first fix** after pressing Tab to fix all -- cursor position is now saved, adjusted for text shifts, and restored after all fixes are applied.
-- **"Tab to fix" hint blocking view** -- hint now appears below the cursor instead of to the right.
 
 ### Changed
 - Excluded Google Docs, Sheets, and Slides via `exclude_matches` (canvas-based rendering, not DOM-accessible).
