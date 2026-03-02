@@ -1,7 +1,6 @@
 /* Wrapper for textarea/input elements */
 .spelling-tab-wrapper {
   position: relative !important;
-  display: inline-block !important;
 }
 
 /* Mirror overlay for textarea/input */

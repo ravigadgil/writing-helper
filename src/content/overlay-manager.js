@@ -34,6 +34,18 @@ export class OverlayManager {
     const wrapper = document.createElement('div');
     wrapper.className = 'spelling-tab-wrapper';
 
+    // Match the element's display and sizing so the wrapper doesn't shrink the textarea
+    const elComputed = window.getComputedStyle(element);
+    const elDisplay = elComputed.display;
+    // Use 'block' for block-level elements, otherwise match the original display
+    if (elDisplay === 'block' || elDisplay === 'flex' || elDisplay === 'grid') {
+      wrapper.style.setProperty('display', 'block', 'important');
+    }
+    // Preserve width — if textarea is 100% or has a specific width, carry it over
+    if (elComputed.width) {
+      wrapper.style.setProperty('width', elComputed.width, 'important');
+    }
+
     const overlay = document.createElement('div');
     overlay.className = 'spelling-tab-overlay';
     overlay.setAttribute('aria-hidden', 'true');
