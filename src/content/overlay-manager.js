@@ -2,7 +2,7 @@ export class OverlayManager {
   constructor(linterClient, suggestionPopup) {
     this.linterClient = linterClient;
     this.suggestionPopup = suggestionPopup;
-    this.overlays = new Map(); // element -> { wrapper, overlay, debounceTimer, lints }
+    this.overlays = new Map(); // element -> { overlay, debounceTimer, lints }
     this.onLintsChanged = null; // callback: (element, lints) => void
     // Cache AI sentence check results: sentenceText -> { improved: string|null }
     this._aiSentenceCache = new Map();
@@ -12,8 +12,8 @@ export class OverlayManager {
   attach(element) {
     if (this.overlays.has(element)) return;
 
-    const { wrapper, overlay } = this.createOverlay(element);
-    const state = { wrapper, overlay, debounceTimer: null, lints: [] };
+    const overlay = this.createOverlay(element);
+    const state = { overlay, debounceTimer: null, lints: [] };
     this.overlays.set(element, state);
 
     element.addEventListener('input', () => this.scheduleCheck(element));
@@ -24,39 +24,35 @@ export class OverlayManager {
       overlay.scrollLeft = element.scrollLeft;
     });
 
-    // Handle textarea resize
+    // Handle textarea resize — sync overlay position and size
     if (typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => this.syncOverlaySize(element)).observe(element);
     }
   }
 
+  /**
+   * Create overlay as a sibling of the element (no wrapping).
+   * This avoids breaking the element's CSS layout (flex child, grid child, etc.).
+   */
   createOverlay(element) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'spelling-tab-wrapper';
-
-    // Match the element's display and sizing so the wrapper doesn't shrink the textarea
-    const elComputed = window.getComputedStyle(element);
-    const elDisplay = elComputed.display;
-    // Use 'block' for block-level elements, otherwise match the original display
-    if (elDisplay === 'block' || elDisplay === 'flex' || elDisplay === 'grid') {
-      wrapper.style.setProperty('display', 'block', 'important');
-    }
-    // Preserve width — if textarea is 100% or has a specific width, carry it over
-    if (elComputed.width) {
-      wrapper.style.setProperty('width', elComputed.width, 'important');
+    // Ensure the element's parent is a positioning context for the overlay
+    const parent = element.parentNode;
+    if (parent && parent !== document.body) {
+      const parentStyle = window.getComputedStyle(parent);
+      if (parentStyle.position === 'static') {
+        parent.style.position = 'relative';
+      }
     }
 
     const overlay = document.createElement('div');
     overlay.className = 'spelling-tab-overlay';
     overlay.setAttribute('aria-hidden', 'true');
 
-    // Insert wrapper around element
-    element.parentNode.insertBefore(wrapper, element);
-    wrapper.appendChild(element);
-    wrapper.appendChild(overlay);
+    // Insert overlay as a sibling right after the element
+    element.after(overlay);
 
     this.syncOverlayStyles(element, overlay);
-    return { wrapper, overlay };
+    return overlay;
   }
 
   syncOverlayStyles(element, overlay) {
@@ -67,7 +63,6 @@ export class OverlayManager {
       'lineHeight', 'letterSpacing', 'wordSpacing',
       'textAlign', 'textTransform', 'textIndent',
       'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
       'boxSizing', 'whiteSpace', 'overflowWrap', 'wordWrap', 'wordBreak',
       'direction', 'textRendering',
     ];
@@ -75,11 +70,12 @@ export class OverlayManager {
       overlay.style[prop] = computed[prop];
     });
 
+    // Position overlay exactly over the element using offset properties
     overlay.style.position = 'absolute';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = computed.width;
-    overlay.style.height = computed.height;
+    overlay.style.top = element.offsetTop + 'px';
+    overlay.style.left = element.offsetLeft + 'px';
+    overlay.style.width = element.offsetWidth + 'px';
+    overlay.style.height = element.offsetHeight + 'px';
     overlay.style.pointerEvents = 'none';
     overlay.style.color = 'transparent';
     overlay.style.background = 'transparent';
@@ -97,9 +93,10 @@ export class OverlayManager {
   syncOverlaySize(element) {
     const state = this.overlays.get(element);
     if (!state) return;
-    const computed = window.getComputedStyle(element);
-    state.overlay.style.width = computed.width;
-    state.overlay.style.height = computed.height;
+    state.overlay.style.top = element.offsetTop + 'px';
+    state.overlay.style.left = element.offsetLeft + 'px';
+    state.overlay.style.width = element.offsetWidth + 'px';
+    state.overlay.style.height = element.offsetHeight + 'px';
   }
 
   scheduleCheck(element) {
@@ -207,9 +204,24 @@ export class OverlayManager {
           e.preventDefault();
           e.stopPropagation();
           const cached = this._aiSentenceCache.get(mark.sentence.text);
-          document.dispatchEvent(new CustomEvent('spelling-tab-sentence-click', {
-            detail: { sentence: mark.sentence, anchorEl: el, element, cachedImproved: cached?.improved },
-          }));
+          const improved = cached?.improved;
+          if (improved) {
+            // Find sentence span in the element's value
+            const fullText = element.value || '';
+            const idx = fullText.indexOf(mark.sentence.text);
+            const spanStart = idx !== -1 ? idx : 0;
+            const spanEnd = idx !== -1 ? idx + mark.sentence.text.length : mark.sentence.text.length;
+            this.suggestionPopup.show({
+              span: { start: spanStart, end: spanEnd },
+              message: 'Writing suggestion',
+              lintKind: 'Enhancement',
+              lintKindPretty: 'AI Improvement',
+              category: 'style',
+              problemText: mark.sentence.text,
+              suggestions: [{ text: improved, kind: 'ReplaceWith' }],
+              _aiDiff: true,
+            }, element, el);
+          }
         });
       }
 
@@ -228,13 +240,19 @@ export class OverlayManager {
   /**
    * Check sentences with AI in the background.
    * Only checks sentences not already cached or in-flight.
+   * Debounce is skipped if all sentences are already handled (cache/in-flight).
    */
   async _checkSentencesWithAI(sentences, element) {
-    // Debounce AI checks — wait 2s after last call to avoid flooding the Prompt API
+    // Check if there are actually new sentences to check
+    const needsCheck = sentences.some(s =>
+      !this._aiSentenceCache.has(s.text) && !this._aiSentenceChecking.has(s.text)
+    );
+    if (!needsCheck) return; // All cached or in-flight, no need to reset timer
+
     clearTimeout(this._aiDebounceTimer);
     this._aiDebounceTimer = setTimeout(() => {
       this._doCheckSentencesWithAI(sentences, element);
-    }, 2000);
+    }, 1000);
   }
 
   async _doCheckSentencesWithAI(sentences, element) {
@@ -243,6 +261,8 @@ export class OverlayManager {
       if (this._aiSentenceChecking.has(sentence.text)) continue;
 
       this._aiSentenceChecking.add(sentence.text);
+      // Keep a copy of the sentence text for the callback closure
+      const sentenceText = sentence.text;
 
       // Cap cache size to prevent memory leak
       if (this._aiSentenceCache.size > 200) {
@@ -250,18 +270,18 @@ export class OverlayManager {
         this._aiSentenceCache.delete(firstKey);
       }
 
-      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentence.text })
+      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentenceText })
         .then(result => {
-          this._aiSentenceChecking.delete(sentence.text);
-          if (result?.available && result.improved && result.improved !== sentence.text) {
-            this._aiSentenceCache.set(sentence.text, { improved: result.improved });
+          this._aiSentenceChecking.delete(sentenceText);
+          if (result?.available && result.improved && result.improved !== sentenceText) {
+            this._aiSentenceCache.set(sentenceText, { improved: result.improved });
             // Re-render to show the new highlight
             const state = this.overlays.get(element);
             if (state) this.renderOverlay(element, element.value, state.lints);
           }
         })
         .catch(() => {
-          this._aiSentenceChecking.delete(sentence.text);
+          this._aiSentenceChecking.delete(sentenceText);
         });
     }
   }

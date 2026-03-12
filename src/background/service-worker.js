@@ -262,6 +262,8 @@ async function handleMessage(message, sender) {
       return sendToOffscreen({ type: 'ai-improve', text: message.text });
     case 'ai-rephrase':
       return sendToOffscreen({ type: 'ai-rephrase', text: message.text, tone: message.tone });
+    case 'ai-draft':
+      return sendToOffscreen({ type: 'ai-draft', prompt: message.prompt, tone: message.tone });
 
     case 'get-enabled':
       return { enabled: isEnabled };

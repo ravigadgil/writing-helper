@@ -141,6 +141,56 @@ Rules:
   return { available: false, rephrased: null };
 }
 
+/**
+ * Draft new text from a prompt in a specific tone.
+ */
+async function handleDraft(prompt, tone) {
+  const available = await checkPromptApi();
+  if (!available) return { available: false, drafted: null };
+
+  const toneInstructions = {
+    neutral: 'Write in a clear, balanced, and neutral tone.',
+    friendly: 'Write in a warm, approachable, and friendly tone.',
+    professional: 'Write in a formal, polished, and professional tone.',
+    casual: 'Write in a relaxed, conversational, and casual tone.',
+  };
+
+  const toneInstruction = toneInstructions[tone] || toneInstructions.neutral;
+
+  const systemPrompt = `You are a writing assistant. The user will describe what they want written and you will compose it for them.
+
+Rules:
+- ${toneInstruction}
+- Write exactly what the user asks for — nothing more, nothing less
+- Do NOT include greetings, sign-offs, or extra commentary unless the user asks
+- Do NOT wrap the output in quotes or add "Here is..." preamble
+- Match the length to what seems appropriate for the request
+- Return ONLY the drafted text — no explanations, no meta-commentary`;
+
+  try {
+    const session = await LanguageModel.create({
+      expectedOutputLanguages: ['en'],
+      initialPrompts: [{ role: 'system', content: systemPrompt }],
+    });
+
+    const drafted = await session.prompt(`Write the following:\n${prompt}`);
+    session.destroy();
+
+    if (drafted && drafted.trim()) {
+      let cleaned = drafted.trim();
+      if ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+          (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+        cleaned = cleaned.slice(1, -1);
+      }
+      return { available: true, drafted: cleaned };
+    }
+  } catch (e) {
+    console.error('[Writing Helper AI] Draft failed:', e);
+  }
+
+  return { available: false, drafted: null };
+}
+
 // Message router — only handle messages targeted at offscreen
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return false;
@@ -152,6 +202,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ai-rephrase') {
     handleRephrase(message.text, message.tone).then(sendResponse);
+    return true;
+  }
+
+  if (message.type === 'ai-draft') {
+    handleDraft(message.prompt, message.tone).then(sendResponse);
     return true;
   }
 

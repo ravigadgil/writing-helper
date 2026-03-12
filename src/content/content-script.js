@@ -4,6 +4,7 @@ import { OverlayManager } from './overlay-manager.js';
 import { ContentEditableHandler } from './contenteditable-handler.js';
 import { TabHint } from './fix-pill.js';
 import { ElementDetector, CE_SELECTOR } from './element-detector.js';
+import { DraftModal } from './draft-modal.js';
 
 const linterClient = new LinterClient();
 const suggestionPopup = new SuggestionPopup();
@@ -494,8 +495,51 @@ function tryShowAIToolbar(sel) {
 
 document.addEventListener('mouseup', (e) => {
   if (aiToolbar && aiToolbar.contains(e.target)) return;
+
+  // For textarea/input elements, window.getSelection() doesn't work —
+  // we need to use selectionStart/selectionEnd instead.
+  const target = e.target;
+  if (target && (target.tagName === 'TEXTAREA' || (target.tagName === 'INPUT' && (!target.type || target.type === 'text')))) {
+    setTimeout(() => tryShowAIToolbarForTextarea(target), 10);
+    return;
+  }
+
   tryShowAIToolbar(getSelectionSafe());
 });
+
+/**
+ * Show AI toolbar for textarea/input text selection.
+ * Uses selectionStart/selectionEnd since window.getSelection() doesn't work for these.
+ */
+function tryShowAIToolbarForTextarea(element) {
+  const start = element.selectionStart;
+  const end = element.selectionEnd;
+  if (start == null || end == null || start === end) {
+    hideAIToolbar();
+    return;
+  }
+
+  const selectedText = element.value.substring(start, end).trim();
+  if (selectedText.length < 10) {
+    hideAIToolbar();
+    return;
+  }
+
+  const tracked = findTrackedElementFromNode(element);
+  if (!tracked) { hideAIToolbar(); return; }
+
+  // Get a bounding rect for positioning the toolbar.
+  // For textareas we approximate using the element's bounding rect.
+  const elRect = element.getBoundingClientRect();
+  const rect = {
+    left: elRect.left,
+    top: elRect.top,
+    bottom: elRect.top + 30, // approximate first line
+    right: elRect.right,
+  };
+
+  showAIToolbarForSelection(selectedText, tracked, rect);
+}
 
 document.addEventListener('mousedown', (e) => {
   if (aiToolbar && !aiToolbar.contains(e.target)) hideAIToolbar();
@@ -532,29 +576,153 @@ ceHandler.attach = function(element) {
   }
 };
 
+// ── AI Draft compose modal ─────────────────────────────────────────────────
+
+const draftModal = new DraftModal();
+let draftButton = null;
+
+function createDraftButton() {
+  if (draftButton) return draftButton;
+  draftButton = document.createElement('button');
+  draftButton.className = 'spelling-tab-draft-trigger';
+  draftButton.textContent = '\u270f\ufe0f';
+  draftButton.title = 'AI Draft (Ctrl+Shift+D)';
+  draftButton.style.setProperty('display', 'none', 'important');
+  document.body.appendChild(draftButton);
+
+  draftButton.addEventListener('mousedown', (e) => {
+    // Prevent blur on the target element
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  draftButton.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openDraftModal();
+  });
+
+  return draftButton;
+}
+
+function hideDraftButton() {
+  if (draftButton) draftButton.style.setProperty('display', 'none', 'important');
+}
+
+function showDraftButton(element) {
+  if (!extensionEnabled) return;
+  const btn = createDraftButton();
+  const rect = element.getBoundingClientRect();
+
+  let left = rect.right - 30 + window.scrollX;
+  let top = rect.bottom - 30 + window.scrollY;
+
+  // Clamp within viewport
+  if (left < 4) left = 4;
+  if (top < 4) top = 4;
+
+  btn.style.setProperty('position', 'absolute', 'important');
+  btn.style.setProperty('left', left + 'px', 'important');
+  btn.style.setProperty('top', top + 'px', 'important');
+  btn.style.setProperty('display', 'flex', 'important');
+}
+
+function openDraftModal() {
+  if (!extensionEnabled) return;
+
+  // Only open for the actively focused element — don't use getActiveTrackedElement's
+  // fallback which picks any element with lints
+  const active = document.activeElement;
+  if (!active) return;
+
+  let tracked = null;
+  if (overlayManager.overlays.has(active)) {
+    tracked = { type: 'overlay', element: active };
+  } else {
+    let el = active;
+    while (el) {
+      if (ceHandler.tracked.has(el)) { tracked = { type: 'ce', element: el }; break; }
+      el = el.parentElement;
+    }
+    if (!tracked) {
+      const ceAncestor = active.closest?.(CE_SELECTOR);
+      if (ceAncestor && ceHandler.tracked.has(ceAncestor)) {
+        tracked = { type: 'ce', element: ceAncestor };
+      }
+    }
+  }
+
+  if (!tracked) return;
+  hideDraftButton();
+  draftModal.show(tracked.element, tracked.type);
+}
+
+// Show draft button when a tracked element is focused
+document.addEventListener('focusin', () => {
+  setTimeout(() => {
+    if (draftModal.isVisible()) return;
+    const tracked = getActiveTrackedElement();
+    if (tracked) {
+      showDraftButton(tracked.element);
+    }
+  }, 300);
+});
+
+// Hide draft button on scroll (it gets orphaned from the textarea)
+window.addEventListener('scroll', () => hideDraftButton(), { passive: true });
+window.addEventListener('resize', () => hideDraftButton(), { passive: true });
+
+// Hide draft button on focusout (with guard for clicking the button itself or modal)
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    if (draftModal.isVisible()) return;
+    const active = document.activeElement;
+    if (active === draftButton) return;
+    if (draftModal.modalEl && draftModal.modalEl.contains(active)) return;
+    const tracked = getActiveTrackedElement();
+    if (!tracked) hideDraftButton();
+  }, 200);
+});
+
 // ── Keyboard shortcut: Ctrl+Shift+I to improve selected text with AI ─────
 
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey && e.shiftKey && e.key === 'I')) return;
 
-  const sel = getSelectionSafe();
-  if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) return;
+  let selectedText = '';
+  let tracked = null;
+  let rect = null;
 
-  const anchor = sel.anchorNode;
-  const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
-  if (!el) return;
+  // Check if focus is on a textarea/input (use selectionStart/End)
+  const active = document.activeElement;
+  if (active && (active.tagName === 'TEXTAREA' || (active.tagName === 'INPUT' && (!active.type || active.type === 'text')))) {
+    const start = active.selectionStart;
+    const end = active.selectionEnd;
+    if (start != null && end != null && start !== end) {
+      selectedText = active.value.substring(start, end).trim();
+      tracked = findTrackedElementFromNode(active);
+      const elRect = active.getBoundingClientRect();
+      rect = { left: elRect.left, top: elRect.top, bottom: elRect.top + 30, right: elRect.right };
+    }
+  }
 
-  const tracked = findTrackedElementFromNode(el);
-  if (!tracked) return;
+  // Fallback: try window.getSelection() for contenteditable
+  if (!selectedText) {
+    const sel = getSelectionSafe();
+    if (!sel || sel.isCollapsed || sel.toString().trim().length < 10) return;
+    selectedText = sel.toString().trim();
+    const anchor = sel.anchorNode;
+    const el = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+    if (!el) return;
+    tracked = findTrackedElementFromNode(el);
+    const range = sel.getRangeAt(0);
+    rect = range.getBoundingClientRect();
+  }
+
+  if (selectedText.length < 10 || !tracked || !rect) return;
 
   e.preventDefault();
   e.stopPropagation();
-
-  const selectedText = sel.toString().trim();
-
-  // Show toolbar in "loading improve" state
-  const range = sel.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
   const toolbar = createAIToolbar();
   toolbar.innerHTML = '';
 
@@ -575,6 +743,16 @@ document.addEventListener('keydown', (e) => {
       setTimeout(hideAIToolbar, 1500);
     }
   });
+});
+
+// ── Keyboard shortcut: Ctrl+Shift+D to open AI Draft modal ───────────────
+
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey && e.shiftKey && e.key === 'D')) return;
+  if (!extensionEnabled) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openDraftModal();
 });
 
 detector.isEnabled = () => extensionEnabled;

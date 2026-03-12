@@ -369,9 +369,24 @@ export class ContentEditableHandler {
             highlight.addEventListener('click', (e) => {
               e.preventDefault();
               e.stopPropagation();
-              document.dispatchEvent(new CustomEvent('spelling-tab-sentence-click', {
-                detail: { sentence, anchorEl: highlight, element, cachedImproved: cached.improved },
-              }));
+              const improved = cached.improved;
+              if (improved) {
+                const state = this.tracked.get(element);
+                const fullText = state?.text || '';
+                const idx = fullText.indexOf(sentence.text);
+                const spanStart = idx !== -1 ? idx : sentence.start;
+                const spanEnd = idx !== -1 ? idx + sentence.text.length : sentence.end;
+                this.suggestionPopup.show({
+                  span: { start: spanStart, end: spanEnd },
+                  message: 'Writing suggestion',
+                  lintKind: 'Enhancement',
+                  lintKindPretty: 'AI Improvement',
+                  category: 'style',
+                  problemText: sentence.text,
+                  suggestions: [{ text: improved, kind: 'ReplaceWith' }],
+                  _aiDiff: true,
+                }, element, highlight);
+              }
             });
 
             container.appendChild(highlight);
@@ -449,11 +464,16 @@ export class ContentEditableHandler {
    * When a result arrives, re-renders underlines to show/hide highlights.
    */
   async _checkSentencesWithAI(sentences, element) {
-    // Debounce AI checks — wait 2s after last call to avoid flooding the Prompt API
+    // Check if there are actually new sentences to check
+    const needsCheck = sentences.some(s =>
+      !this._aiSentenceCache.has(s.text) && !this._aiSentenceChecking.has(s.text)
+    );
+    if (!needsCheck) return; // All cached or in-flight, no need to reset timer
+
     clearTimeout(this._aiDebounceTimer);
     this._aiDebounceTimer = setTimeout(() => {
       this._doCheckSentencesWithAI(sentences, element);
-    }, 2000);
+    }, 1000);
   }
 
   async _doCheckSentencesWithAI(sentences, element) {
@@ -462,6 +482,7 @@ export class ContentEditableHandler {
       if (this._aiSentenceChecking.has(sentence.text)) continue;
 
       this._aiSentenceChecking.add(sentence.text);
+      const sentenceText = sentence.text;
 
       // Cap cache size to prevent memory leak
       if (this._aiSentenceCache.size > 200) {
@@ -470,17 +491,17 @@ export class ContentEditableHandler {
       }
 
       // Fire and forget — re-render when result comes back
-      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentence.text })
+      chrome.runtime.sendMessage({ type: 'ai-improve', text: sentenceText })
         .then(result => {
-          this._aiSentenceChecking.delete(sentence.text);
-          if (result?.available && result.improved && result.improved !== sentence.text) {
-            this._aiSentenceCache.set(sentence.text, { improved: result.improved });
+          this._aiSentenceChecking.delete(sentenceText);
+          if (result?.available && result.improved && result.improved !== sentenceText) {
+            this._aiSentenceCache.set(sentenceText, { improved: result.improved });
             // Re-render to show the new highlight
             this.renderUnderlines(element);
           }
         })
         .catch(() => {
-          this._aiSentenceChecking.delete(sentence.text);
+          this._aiSentenceChecking.delete(sentenceText);
         });
     }
   }

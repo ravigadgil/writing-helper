@@ -2,6 +2,17 @@
 
 All notable changes to Writing Helper are documented here.
 
+## [1.1.0] - 2026-03-12
+
+### Added
+- **AI Draft compose** -- New drafting feature: click the ✏️ button (or press `Ctrl+Shift+D`) on any text field to open a compose modal. Describe what you want written, pick a tone (Neutral, Friendly, Professional, Casual), and Gemini Nano drafts it for you. Click "Insert" to place the text at your cursor. Supports `Ctrl+Enter` to generate.
+- **AI toolbar for textarea selections** -- The AI Improve/Rephrase toolbar now appears when selecting text in `<textarea>` and `<input>` elements (previously only worked on contenteditable).
+
+### Fixed
+- **Textarea/input shrinking** -- Completely removed the wrapper `<div>` approach that broke flex/grid layouts. Overlay is now a sibling element positioned with `offsetTop`/`offsetLeft`.
+- **AI suggestions not appearing on non-Gmail sites** -- AI sentence check debounce timer was resetting on every re-render. Now skips timer reset when all sentences are already cached or in-flight.
+- **AI suggestion click not showing popup** -- Purple underline clicks now show the suggestion popup directly instead of going through custom event indirection.
+
 ## [1.0.3] - 2026-02-26
 
 ### Fixed
